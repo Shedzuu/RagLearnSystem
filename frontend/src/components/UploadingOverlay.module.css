@@ -1,0 +1,59 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 2rem 2.5rem;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+}
+
+.line1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.line2 {
+  margin: 0 0 1.5rem;
+  font-size: 1rem;
+  color: #333;
+}
+
+.bar {
+  width: 280px;
+  height: 8px;
+  border-radius: 4px;
+  background: #e0e7ff;
+  overflow: hidden;
+}
+
+.knob {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #2563eb;
+  margin-top: -2px;
+  margin-left: 0;
+  animation: uploading 1.2s ease-in-out infinite;
+}
+
+@keyframes uploading {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(268px);
+  }
+}

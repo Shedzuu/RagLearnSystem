@@ -1,0 +1,62 @@
+.zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 2px dashed #93c5fd;
+  border-radius: 12px;
+  padding: 2rem;
+  background: #fff;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.zone.drag {
+  border-color: #2563eb;
+  background: #f8fafc;
+}
+
+.uploadIcon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 1rem;
+  object-fit: contain;
+  display: block;
+}
+
+.docIcon {
+  width: 20px;
+  height: 20px;
+  margin-right: 0.35rem;
+  object-fit: contain;
+  vertical-align: middle;
+}
+
+.hint {
+  margin: 1rem 0 0;
+  color: #1a1a1a;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+
+.button {
+  padding: 0.5rem 1.25rem;
+  font-size: 1rem;
+  border: none;
+  border-radius: 8px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.button:hover {
+  background: #1d4ed8;
+}
+
+.input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
