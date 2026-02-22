@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import ThemeToggle from '../components/ThemeToggle'
 import styles from './AuthPage.module.css'
 
 export default function AuthPage() {
@@ -38,6 +39,11 @@ export default function AuthPage() {
 
   return (
     <div className={styles.page}>
+      <header className={styles.header}>
+        <Link to="/" className={styles.logo}>Smart Knowledge Hub</Link>
+        <ThemeToggle />
+      </header>
+      <div className={styles.cardWrap}>
       <div className={styles.card}>
         <h1 className={styles.title}>Welcome</h1>
 
@@ -145,6 +151,7 @@ export default function AuthPage() {
             <img src="/assets/google_logo.png" alt="Google" className={styles.googleIcon} />
           </button>
         </div>
+      </div>
       </div>
     </div>
   )

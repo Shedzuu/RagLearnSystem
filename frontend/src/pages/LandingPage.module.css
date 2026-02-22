@@ -39,18 +39,10 @@
   text-decoration: underline;
 }
 
-.themeToggle {
-  padding: 0.35rem 0.75rem;
-  font-size: 0.85rem;
-  color: var(--text);
-  background: transparent;
-  border: 1px solid var(--header-border);
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.themeToggle:hover {
-  opacity: 0.85;
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .profileWrap {

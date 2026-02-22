@@ -5,7 +5,7 @@ import BlockRow from '../components/BlockRow'
 import ReviewsSlider from '../components/ReviewsSlider'
 import AIChatPanel from '../components/AIChatPanel'
 import { useAuth } from '../context/AuthContext'
-import { useTheme } from '../context/ThemeContext'
+import ThemeToggle from '../components/ThemeToggle'
 import styles from './LandingPage.module.css'
 
 const stepsBlocks = [
@@ -24,7 +24,6 @@ const reviewsBlocks = [
 export default function LandingPage() {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
-  const { theme, toggleTheme } = useTheme()
   const [chatOpen, setChatOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRef = useRef(null)
@@ -63,10 +62,9 @@ export default function LandingPage() {
             Contacts
           </button>
         </nav>
-        <button type="button" className={styles.themeToggle} onClick={toggleTheme} aria-label="Toggle theme">
-          {theme === 'light' ? 'Dark' : 'Light'}
-        </button>
-        <div className={styles.profileWrap} ref={profileRef}>
+        <div className={styles.headerRight}>
+          <ThemeToggle />
+          <div className={styles.profileWrap} ref={profileRef}>
           <button
             type="button"
             className={styles.profileBtn}
@@ -83,6 +81,7 @@ export default function LandingPage() {
               </p>
             </div>
           )}
+          </div>
         </div>
       </header>
 
