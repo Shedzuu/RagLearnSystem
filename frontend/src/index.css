@@ -4,11 +4,40 @@
   box-sizing: border-box;
 }
 
+:root,
+[data-theme="light"] {
+  --page-bg: #fafafa;
+  --header-bg: #fff;
+  --header-border: #eee;
+  --text: #1a1a1a;
+  --text-muted: #666;
+  --footer-bg: #3d3d3d;
+  --footer-text: #e0e0e0;
+  --chat-btn-bg: #4a4a4a;
+  --chat-btn-hover: #333;
+  --card-bg: #fff;
+  --card-border: #e0e0e0;
+}
+
+[data-theme="dark"] {
+  --page-bg: #1a1a1a;
+  --header-bg: #2d2d2d;
+  --header-border: #444;
+  --text: #e8e8e8;
+  --text-muted: #b0b0b0;
+  --footer-bg: #111;
+  --footer-text: #c0c0c0;
+  --chat-btn-bg: #444;
+  --chat-btn-hover: #555;
+  --card-bg: #2d2d2d;
+  --card-border: #444;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
-  color: #1a1a1a;
+  color: var(--text);
 }
 
 #root {

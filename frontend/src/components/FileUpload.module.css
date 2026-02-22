@@ -5,7 +5,7 @@
   border: 2px dashed #93c5fd;
   border-radius: 12px;
   padding: 2rem;
-  background: #fff;
+  background: var(--card-bg);
   transition: border-color 0.2s, background 0.2s;
 }
 
@@ -32,7 +32,7 @@
 
 .hint {
   margin: 1rem 0 0;
-  color: #1a1a1a;
+  color: var(--text, #1a1a1a);
   font-size: 0.9rem;
   text-align: center;
 }

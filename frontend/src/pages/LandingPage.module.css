@@ -2,7 +2,7 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #fafafa;
+  background: var(--page-bg);
 }
 
 .header {
@@ -10,15 +10,15 @@
   align-items: center;
   justify-content: space-between;
   padding: 1rem 2rem;
-  background: #fff;
-  border-bottom: 1px solid #eee;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--header-border);
 }
 
 .logo {
   margin: 0;
   font-size: 1.25rem;
   font-weight: 700;
-  color: #1a1a1a;
+  color: var(--text);
 }
 
 .nav {
@@ -30,7 +30,7 @@
   background: none;
   border: none;
   font-size: 0.95rem;
-  color: #1a1a1a;
+  color: var(--text);
   cursor: pointer;
   padding: 0;
 }
@@ -39,10 +39,67 @@
   text-decoration: underline;
 }
 
+.themeToggle {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--header-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.themeToggle:hover {
+  opacity: 0.85;
+}
+
+.profileWrap {
+  position: relative;
+}
+
+.profileBtn {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
 .userIcon {
   width: 32px;
   height: 32px;
   object-fit: contain;
+}
+
+.profileDropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.5rem;
+  min-width: 180px;
+  padding: 0.75rem;
+  background: var(--header-bg);
+  border: 1px solid var(--header-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+}
+
+.profileName {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.logoutText {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.logoutText:hover {
+  opacity: 0.85;
 }
 
 .main {
@@ -62,7 +119,7 @@
   margin: 0 0 2rem;
   font-size: 2rem;
   font-weight: 700;
-  color: #1a1a1a;
+  color: var(--text);
 }
 
 .uploadWrap {
@@ -77,7 +134,7 @@
   text-align: center;
   margin: 0 0 1rem;
   font-size: 0.9rem;
-  color: #666;
+  color: var(--text-muted);
 }
 
 .sectionTitle {
@@ -85,7 +142,7 @@
   margin: 0 0 1.5rem;
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--text);
 }
 
 .footer {
@@ -94,8 +151,8 @@
   align-items: flex-start;
   gap: 2rem;
   padding: 2rem;
-  background: #3d3d3d;
-  color: #e0e0e0;
+  background: var(--footer-bg);
+  color: var(--footer-text);
   font-size: 0.9rem;
 }
 
@@ -143,7 +200,7 @@
   height: 56px;
   border-radius: 50%;
   border: none;
-  background: #4a4a4a;
+  background: var(--chat-btn-bg);
   color: #fff;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
@@ -151,7 +208,7 @@
 }
 
 .chatBtn:hover {
-  background: #333;
+  background: var(--chat-btn-hover);
 }
 
 .chatBtnIcon {

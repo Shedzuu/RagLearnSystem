@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import FileUpload from '../components/FileUpload'
 import BlockRow from '../components/BlockRow'
 import ReviewsSlider from '../components/ReviewsSlider'
 import AIChatPanel from '../components/AIChatPanel'
+import { useAuth } from '../context/AuthContext'
+import { useTheme } from '../context/ThemeContext'
 import styles from './LandingPage.module.css'
 
 const stepsBlocks = [
@@ -19,7 +22,20 @@ const reviewsBlocks = [
 ]
 
 export default function LandingPage() {
+  const navigate = useNavigate()
+  const { user, logout } = useAuth()
+  const { theme, toggleTheme } = useTheme()
   const [chatOpen, setChatOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const profileRef = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (profileRef.current && !profileRef.current.contains(e.target)) setProfileOpen(false)
+    }
+    if (profileOpen) document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [profileOpen])
 
   const handleFileSelect = (file) => {
     console.log('File selected (backend later):', file?.name)
@@ -43,11 +59,31 @@ export default function LandingPage() {
           <button type="button" onClick={() => scrollTo('reviews')}>
             Reviews
           </button>
-          <button type="button" onClick={() => scrollTo('footer')}>
-            Footer
+          <button type="button" onClick={() => scrollTo('contacts')}>
+            Contacts
           </button>
         </nav>
-        <img src="/assets/user_profile.png" alt="User profile" className={styles.userIcon} />
+        <button type="button" className={styles.themeToggle} onClick={toggleTheme} aria-label="Toggle theme">
+          {theme === 'light' ? 'Dark' : 'Light'}
+        </button>
+        <div className={styles.profileWrap} ref={profileRef}>
+          <button
+            type="button"
+            className={styles.profileBtn}
+            onClick={() => (user ? setProfileOpen((o) => !o) : navigate('/login'))}
+            aria-label="Profile"
+          >
+            <img src="/assets/user_profile.png" alt="" className={styles.userIcon} />
+          </button>
+          {user && profileOpen && (
+            <div className={styles.profileDropdown}>
+              <p className={styles.profileName}>{user.firstName} {user.lastName}</p>
+              <p role="button" tabIndex={0} className={styles.logoutText} onClick={() => { logout(); setProfileOpen(false); }} onKeyDown={(e) => e.key === 'Enter' && (logout(), setProfileOpen(false))}>
+                Log out
+              </p>
+            </div>
+          )}
+        </div>
       </header>
 
       <main className={styles.main}>
@@ -69,7 +105,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className={styles.footer} id="footer">
+      <footer className={styles.footer} id="contacts">
         <div className={styles.footerLeft}>
           <p>Almaty region, Karasay district 040900, Kaskelen city, Abylai Khan street 1/1</p>
           <p>
