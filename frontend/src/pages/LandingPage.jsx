@@ -71,7 +71,7 @@ export default function LandingPage() {
             onClick={() => (user ? setProfileOpen((o) => !o) : navigate('/login'))}
             aria-label="Profile"
           >
-            <img src="/assets/user_profile.png" alt="" className={styles.userIcon} />
+            <img src={user ? "/assets/profile_logo_after_login.png" : "/assets/user_profile.png"} alt="" className={styles.userIcon} />
           </button>
           {user && profileOpen && (
             <div className={styles.profileDropdown}>
