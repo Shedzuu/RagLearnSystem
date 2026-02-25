@@ -1,19 +1,16 @@
 # Диплом — Учебные планы и тесты
 
-Стек (планируется): **Django (бекенд) + React (фронтенд)**.
+Стек: **Django (бекенд) + React (фронтенд)**. PostgreSQL для хранения пользователей, роадмапов, курсов, задач и фидбеков.
 
 ## Структура
 
 ```
 Diploma/
-├── backend/          # Django — пока пусто, подключится позже
-├── frontend/         # React (Vite) — страницы и UI
-│   └── src/
-│       ├── pages/    # Одна папка = одна страница (LandingPage, потом Auth, Dashboard и т.д.)
-│       ├── components/
-│       ├── App.jsx   # Роуты: новые страницы добавлять в <Route path="..." element={...} />
-│       └── main.jsx
-└── design/           # Макеты (landing, uploading и др.)
+├── backend/          # Django + DRF, PostgreSQL
+│   ├── config/       # Настройки проекта
+│   └── users/        # Регистрация, авторизация (JWT), модель User
+├── frontend/         # React (Vite)
+└── design/           # Макеты
 ```
 
 ## Как добавить новую страницу
@@ -36,4 +33,15 @@ Diploma/
 docker compose up --build
 ```
 
-Фронтенд: http://localhost:5173
+- **Фронтенд:** http://localhost:5173  
+- **Бекенд API:** http://localhost:8000  
+- **PostgreSQL:** localhost:5432 (логин/пароль в `.env` или в `docker-compose.yml`)
+
+При первом запуске бекенд сам выполняет миграции.
+
+## API (бекенд)
+
+- **Регистрация:** `POST /api/auth/register/` — тело: `{ "email", "password", "password_confirm", "first_name", "last_name" }`
+- **Вход (JWT):** `POST /api/auth/token/` — тело: `{ "email", "password" }` → в ответе `access` и `refresh`
+- **Обновление токена:** `POST /api/auth/token/refresh/` — тело: `{ "refresh": "<refresh_token>" }`
+- **Текущий пользователь:** `GET /api/auth/me/` — заголовок: `Authorization: Bearer <access_token>`
