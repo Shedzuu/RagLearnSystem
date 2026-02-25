@@ -6,21 +6,21 @@ import styles from './CreatePlanPage.module.css'
 
 export default function CreatePlanPage() {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
 
   useEffect(() => {
-    if (!user) navigate('/login', { state: { fromUpload: true } })
-  }, [user, navigate])
+    if (!loading && !user) navigate('/login', { state: { fromUpload: true } })
+  }, [user, loading, navigate])
 
   const handleSubmit = (e) => {
     e.preventDefault()
     console.log('Create plan (backend later):', { name, description })
   }
 
-  if (!user) return null
+  if (loading || !user) return null
 
   return (
     <div className={styles.page}>

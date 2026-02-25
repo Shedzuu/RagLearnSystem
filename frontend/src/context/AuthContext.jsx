@@ -1,32 +1,73 @@
-import { createContext, useContext, useState, useEffect } from 'react'
-
-const STORAGE_KEY = 'diploma_user'
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { authApi } from '../api/client'
 
 const AuthContext = createContext(null)
 
+function mapUser(apiUser) {
+  if (!apiUser) return null
+  return {
+    id: apiUser.id,
+    email: apiUser.email,
+    firstName: apiUser.first_name || '',
+    lastName: apiUser.last_name || '',
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const loadUser = useCallback(async () => {
+    const access = authApi.getStoredAccess()
+    if (!access) {
+      setLoading(false)
+      return
+    }
     try {
-      const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored) setUser(JSON.parse(stored))
-    } catch (_) {}
+      const data = await authApi.getMe()
+      setUser(mapUser(data))
+    } catch (e) {
+      if (e.status === 401) {
+        try {
+          await authApi.refreshToken()
+          const data = await authApi.getMe()
+          setUser(mapUser(data))
+        } catch (_) {
+          authApi.logout()
+          setUser(null)
+        }
+      } else {
+        setUser(null)
+      }
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  const login = (userData) => {
-    const u = { firstName: userData.firstName, lastName: userData.lastName }
-    setUser(u)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(u))
+  useEffect(() => {
+    loadUser()
+  }, [loadUser])
+
+  const login = async (email, password) => {
+    await authApi.login(email, password)
+    const data = await authApi.getMe()
+    setUser(mapUser(data))
+  }
+
+  const register = async (data) => {
+    await authApi.register(data)
+    await authApi.login(data.email, data.password)
+    const me = await authApi.getMe()
+    setUser(mapUser(me))
   }
 
   const logout = () => {
+    authApi.logout()
     setUser(null)
-    localStorage.removeItem(STORAGE_KEY)
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   )

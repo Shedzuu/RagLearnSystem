@@ -7,8 +7,10 @@ import styles from './AuthPage.module.css'
 export default function AuthPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { login } = useAuth()
+  const { login, register } = useAuth()
   const [mode, setMode] = useState('signin')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const [signIn, setSignIn] = useState({ email: '', password: '' })
   const [signUp, setSignUp] = useState({
     firstName: '',
@@ -18,29 +20,55 @@ export default function AuthPage() {
     confirmPassword: '',
   })
 
-  const switchToSignUp = () => setMode('signup')
-  const switchToSignIn = () => setMode('signin')
+  const switchToSignUp = () => { setMode('signup'); setError('') }
+  const switchToSignIn = () => { setMode('signin'); setError('') }
 
   const redirectAfterLogin = () => {
     if (location.state?.fromUpload) navigate('/create-plan')
     else navigate('/')
   }
 
-  const handleSignInSubmit = (e) => {
+  const handleSignInSubmit = async (e) => {
     e.preventDefault()
-    login({ firstName: 'User', lastName: 'Demo' })
-    redirectAfterLogin()
+    setError('')
+    setSubmitting(true)
+    try {
+      await login(signIn.email, signIn.password)
+      redirectAfterLogin()
+    } catch (err) {
+      setError(err.body?.detail || err.message || 'Login failed')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  const handleSignUpSubmit = (e) => {
+  const handleSignUpSubmit = async (e) => {
     e.preventDefault()
-    login({ firstName: signUp.firstName, lastName: signUp.lastName })
-    redirectAfterLogin()
+    setError('')
+    if (signUp.password !== signUp.confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await register({
+        email: signUp.email,
+        password: signUp.password,
+        password_confirm: signUp.confirmPassword,
+        first_name: signUp.firstName,
+        last_name: signUp.lastName,
+      })
+      redirectAfterLogin()
+    } catch (err) {
+      const msg = err.body?.email?.[0] || err.body?.password?.[0] || err.body?.password_confirm?.[0] || err.message || 'Registration failed'
+      setError(typeof msg === 'string' ? msg : msg.join?.(' ') || 'Registration failed')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const handleGoogle = () => {
-    login({ firstName: 'Google', lastName: 'User' })
-    redirectAfterLogin()
+    setError('Google login is not connected to the backend yet')
   }
 
   return (
@@ -52,7 +80,7 @@ export default function AuthPage() {
       <div className={styles.cardWrap}>
       <div className={styles.card}>
         <h1 className={styles.title}>Welcome</h1>
-
+        {error && <p className={styles.error}>{error}</p>}
         <div className={`${styles.formWrap} ${mode === 'signin' ? styles.formWrapSignIn : styles.formWrapSignUp}`}>
           <div className={styles.form}>
             <form onSubmit={handleSignInSubmit}>
@@ -78,7 +106,9 @@ export default function AuthPage() {
                 />
               </label>
               <a href="#" className={styles.link}>Forgot password?</a>
-              <button type="submit" className={styles.btn}>Log in</button>
+              <button type="submit" className={styles.btn} disabled={submitting}>
+                {submitting ? 'Logging in…' : 'Log in'}
+              </button>
               <p className={styles.switch}>
                 No account?{' '}
                 <button type="button" className={styles.linkBtn} onClick={switchToSignUp}>
@@ -140,7 +170,9 @@ export default function AuthPage() {
                   required
                 />
               </label>
-              <button type="submit" className={styles.btn}>Register</button>
+              <button type="submit" className={styles.btn} disabled={submitting}>
+                {submitting ? 'Registering…' : 'Register'}
+              </button>
               <p className={styles.switch}>
                 Have an account?{' '}
                 <button type="button" className={styles.linkBtn} onClick={switchToSignIn}>

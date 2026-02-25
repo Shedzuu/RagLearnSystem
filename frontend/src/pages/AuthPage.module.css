@@ -50,6 +50,15 @@
   color: var(--text);
 }
 
+.error {
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  color: #b91c1c;
+  background: #fef2f2;
+  border-radius: 8px;
+}
+
 .formWrap {
   display: grid;
   transition: grid-template-rows 0.4s ease-out;
