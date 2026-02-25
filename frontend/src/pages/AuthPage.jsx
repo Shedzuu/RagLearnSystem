@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import ThemeToggle from '../components/ThemeToggle'
 import styles from './AuthPage.module.css'
 
 export default function AuthPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { login } = useAuth()
   const [mode, setMode] = useState('signin')
   const [signIn, setSignIn] = useState({ email: '', password: '' })
@@ -20,21 +21,26 @@ export default function AuthPage() {
   const switchToSignUp = () => setMode('signup')
   const switchToSignIn = () => setMode('signin')
 
+  const redirectAfterLogin = () => {
+    if (location.state?.fromUpload) navigate('/create-plan')
+    else navigate('/')
+  }
+
   const handleSignInSubmit = (e) => {
     e.preventDefault()
     login({ firstName: 'User', lastName: 'Demo' })
-    navigate('/')
+    redirectAfterLogin()
   }
 
   const handleSignUpSubmit = (e) => {
     e.preventDefault()
     login({ firstName: signUp.firstName, lastName: signUp.lastName })
-    navigate('/')
+    redirectAfterLogin()
   }
 
   const handleGoogle = () => {
     login({ firstName: 'Google', lastName: 'User' })
-    navigate('/')
+    redirectAfterLogin()
   }
 
   return (

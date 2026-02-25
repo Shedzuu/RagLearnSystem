@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import FileUpload from '../components/FileUpload'
 import BlockRow from '../components/BlockRow'
 import ReviewsSlider from '../components/ReviewsSlider'
 import AIChatPanel from '../components/AIChatPanel'
 import { useAuth } from '../context/AuthContext'
-import ThemeToggle from '../components/ThemeToggle'
+import AppHeader from '../components/AppHeader'
 import styles from './LandingPage.module.css'
 
 const stepsBlocks = [
@@ -23,21 +23,16 @@ const reviewsBlocks = [
 
 export default function LandingPage() {
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const [chatOpen, setChatOpen] = useState(false)
-  const [profileOpen, setProfileOpen] = useState(false)
-  const profileRef = useRef(null)
-
-  useEffect(() => {
-    function handleClickOutside(e) {
-      if (profileRef.current && !profileRef.current.contains(e.target)) setProfileOpen(false)
-    }
-    if (profileOpen) document.addEventListener('click', handleClickOutside)
-    return () => document.removeEventListener('click', handleClickOutside)
-  }, [profileOpen])
 
   const handleFileSelect = (file) => {
-    console.log('File selected (backend later):', file?.name)
+    if (!user) {
+      navigate('/login', { state: { fromUpload: true } })
+      return
+    }
+    // Залогинен — сразу на страницу создания плана (файл можно передать в state при необходимости)
+    navigate('/create-plan', { state: { uploadedFile: file } })
   }
 
   const scrollTo = (id) => {
@@ -46,44 +41,7 @@ export default function LandingPage() {
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <h1 className={styles.logo}>Smart Knowledge Hub</h1>
-        <nav className={styles.nav}>
-          <button type="button" onClick={() => scrollTo('upload')}>
-            Upload
-          </button>
-          <button type="button" onClick={() => scrollTo('preview')}>
-            Preview
-          </button>
-          <button type="button" onClick={() => scrollTo('reviews')}>
-            Reviews
-          </button>
-          <button type="button" onClick={() => scrollTo('contacts')}>
-            Contacts
-          </button>
-        </nav>
-        <div className={styles.headerRight}>
-          <ThemeToggle />
-          <div className={styles.profileWrap} ref={profileRef}>
-          <button
-            type="button"
-            className={styles.profileBtn}
-            onClick={() => (user ? setProfileOpen((o) => !o) : navigate('/login'))}
-            aria-label="Profile"
-          >
-            <img src={user ? "/assets/profile_logo_after_login.png" : "/assets/user_profile.png"} alt="" className={styles.userIcon} />
-          </button>
-          {user && profileOpen && (
-            <div className={styles.profileDropdown}>
-              <p className={styles.profileName}>{user.firstName} {user.lastName}</p>
-              <p role="button" tabIndex={0} className={styles.logoutText} onClick={() => { logout(); setProfileOpen(false); }} onKeyDown={(e) => e.key === 'Enter' && (logout(), setProfileOpen(false))}>
-                Log out
-              </p>
-            </div>
-          )}
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       <main className={styles.main}>
         <section className={styles.hero} id="upload">
