@@ -25,6 +25,7 @@ services:
     environment:
       - SECRET_KEY=dev-secret-key
       - DEBUG=1
+      - ALLOWED_HOSTS=localhost,127.0.0.1,backend
       - DB_ENGINE=django.db.backends.postgresql
       - DB_NAME=diploma
       - DB_USER=diploma
@@ -45,6 +46,10 @@ services:
       - /app/node_modules
     environment:
       - NODE_ENV=development
+      # В Docker фронт в контейнере: бекенд доступен по имени сервиса
+      - VITE_PROXY_TARGET=http://backend:8000
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:
