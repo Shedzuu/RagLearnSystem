@@ -6,6 +6,7 @@ import ReviewsSlider from '../components/ReviewsSlider'
 import AIChatPanel from '../components/AIChatPanel'
 import { useAuth } from '../context/AuthContext'
 import AppHeader from '../components/AppHeader'
+import UploadingOverlay from '../components/UploadingOverlay'
 import styles from './LandingPage.module.css'
 
 const stepsBlocks = [
@@ -25,14 +26,19 @@ export default function LandingPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [chatOpen, setChatOpen] = useState(false)
+  const [uploading, setUploading] = useState(false)
 
   const handleFileSelect = (file) => {
     if (!user) {
       navigate('/login', { state: { fromUpload: true } })
       return
     }
-    // Залогинен — сразу на страницу создания плана (файл можно передать в state при необходимости)
-    navigate('/create-plan', { state: { uploadedFile: file } })
+    // Залогинен — показываем анимацию загрузки и затем ведём на страницу создания плана
+    setUploading(true)
+    setTimeout(() => {
+      setUploading(false)
+      navigate('/create-plan', { state: { uploadedFile: file } })
+    }, 2500)
   }
 
   const scrollTo = (id) => {
@@ -98,6 +104,7 @@ export default function LandingPage() {
       </button>
 
       <AIChatPanel isOpen={chatOpen} onClose={() => setChatOpen(false)} />
+      {uploading && <UploadingOverlay />}
     </div>
   )
 }

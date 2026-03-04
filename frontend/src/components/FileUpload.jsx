@@ -1,22 +1,17 @@
 import { useState, useRef } from 'react'
-import UploadingOverlay from './UploadingOverlay'
 import styles from './FileUpload.module.css'
 
 /**
  * Зона выбора файла или перетаскивания.
- * onFileSelect(file) — вызывается при выборе/дропе файла (для будущего бекенда).
+ * onFileSelect(file) — вызывается при выборе/дропе файла.
  */
 export default function FileUpload({ onFileSelect }) {
   const [drag, setDrag] = useState(false)
-  const [uploading, setUploading] = useState(false)
   const inputRef = useRef(null)
 
   const handleFile = (file) => {
     if (!file) return
-    setUploading(true)
-    // Имитация загрузки; когда будет бекенд — заменить на реальный запрос
     if (onFileSelect) onFileSelect(file)
-    setTimeout(() => setUploading(false), 2500)
   }
 
   const onDrop = (e) => {
@@ -64,7 +59,6 @@ export default function FileUpload({ onFileSelect }) {
         </button>
         <p className={styles.hint}>Or drag and drop a file</p>
       </div>
-      {uploading && <UploadingOverlay />}
     </>
   )
 }
