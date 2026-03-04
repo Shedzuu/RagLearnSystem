@@ -1,9 +1,23 @@
+import os
+
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Plan, Unit, Attempt, Enrollment, Question, Choice, Answer, AnswerChoice
+from .models import (
+    Plan,
+    Unit,
+    Attempt,
+    Enrollment,
+    Question,
+    Choice,
+    Answer,
+    AnswerChoice,
+    Document,
+)
 from .serializers import (
     PlanListSerializer,
     PlanDetailSerializer,
@@ -129,5 +143,53 @@ class SubmitAnswerView(APIView):
                 "earned_points": answer.earned_points,
             },
             status=status.HTTP_200_OK,
+        )
+
+
+class PlanDocumentUploadView(APIView):
+    """Upload a source document file for a plan."""
+
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, plan_id, *args, **kwargs):
+        plan = get_object_or_404(Plan, id=plan_id, owner=request.user)
+        uploaded_file = request.FILES.get("file")
+        if not uploaded_file:
+            return Response(
+                {"detail": "file is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Ensure directory exists
+        documents_dir = os.path.join(settings.BASE_DIR, "media", "documents")
+        os.makedirs(documents_dir, exist_ok=True)
+
+        filename = uploaded_file.name
+        # Simple unique filename
+        unique_name = f"{plan.id}_{filename}"
+        file_path = os.path.join(documents_dir, unique_name)
+
+        with open(file_path, "wb+") as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
+
+        rel_path = os.path.relpath(file_path, settings.BASE_DIR)
+
+        doc = Document.objects.create(
+            plan=plan,
+            file_path=rel_path,
+            original_name=filename,
+            file_size=uploaded_file.size,
+        )
+
+        return Response(
+            {
+                "id": doc.id,
+                "original_name": doc.original_name,
+                "file_path": doc.file_path,
+                "file_size": doc.file_size,
+            },
+            status=status.HTTP_201_CREATED,
         )
 
