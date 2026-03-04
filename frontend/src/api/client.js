@@ -92,3 +92,42 @@ export const authApi = {
   getStoredAccess,
   clearTokens,
 }
+
+export const plansApi = {
+  async listPlans() {
+    return request('/plans/')
+  },
+
+  async createPlan({ title, description }) {
+    return request('/plans/', {
+      method: 'POST',
+      body: JSON.stringify({ title, description }),
+    })
+  },
+
+  async uploadDocument(planId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const headers = {}
+    const access = getStoredAccess()
+    if (access) headers['Authorization'] = `Bearer ${access}`
+
+    const res = await fetch(`${API_BASE}/plans/${planId}/documents/`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+    if (!res.ok) {
+      const err = new Error(res.statusText || 'Upload failed')
+      err.status = res.status
+      try {
+        err.body = await res.json()
+      } catch (_) {
+        err.body = null
+      }
+      throw err
+    }
+    return res.json()
+  },
+}
