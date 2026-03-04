@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import ThemeToggle from './ThemeToggle'
 import styles from './AppHeader.module.css'
 
 export default function AppHeader() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user, logout } = useAuth()
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRef = useRef(null)
@@ -26,14 +27,28 @@ export default function AppHeader() {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  const onLanding = location.pathname === '/'
+
   return (
     <header className={styles.header}>
       <Link to="/" className={styles.logo}>Smart Knowledge Hub</Link>
       <nav className={styles.nav}>
-        <button type="button" onClick={() => scrollTo('upload')}>Upload</button>
-        <button type="button" onClick={() => scrollTo('preview')}>Preview</button>
-        <button type="button" onClick={() => scrollTo('reviews')}>Reviews</button>
-        <button type="button" onClick={() => scrollTo('contacts')}>Contacts</button>
+        {onLanding ? (
+          <>
+            <button type="button" onClick={() => scrollTo('upload')}>Upload</button>
+            <button type="button" onClick={() => scrollTo('preview')}>Preview</button>
+            <button type="button" onClick={() => scrollTo('reviews')}>Reviews</button>
+            <button type="button" onClick={() => scrollTo('contacts')}>Contacts</button>
+          </>
+        ) : (
+          <>
+            {user && (
+              <button type="button" onClick={() => navigate('/plans')}>
+                Plans
+              </button>
+            )}
+          </>
+        )}
       </nav>
       <div className={styles.headerRight}>
         <ThemeToggle />
