@@ -53,11 +53,13 @@ class PlanDetailSerializer(serializers.ModelSerializer):
 
 class UnitDetailSerializer(serializers.ModelSerializer):
   questions = QuestionSerializer(many=True, read_only=True)
+  section_id = serializers.IntegerField(read_only=True)
+  plan_id = serializers.IntegerField(source='section.plan_id', read_only=True)
 
   class Meta:
       model = Unit
-      fields = ("id", "title", "order", "theory", "generation_status", "questions")
-      read_only_fields = ("id", "generation_status", "questions")
+      fields = ("id", "title", "order", "theory", "generation_status", "section_id", "plan_id", "questions")
+      read_only_fields = ("id", "generation_status", "section_id", "plan_id", "questions")
 
 
 class AnswerChoiceCreateSerializer(serializers.Serializer):
