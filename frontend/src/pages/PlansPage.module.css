@@ -46,6 +46,7 @@
   border: 1px solid #e5e7eb;
   padding: 16px 18px;
   background: #f9fafb;
+  cursor: pointer;
 }
 
 .planTitle {

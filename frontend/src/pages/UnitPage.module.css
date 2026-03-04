@@ -1,0 +1,131 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--page-bg);
+}
+
+.main {
+  flex: 1;
+  padding: 2.5rem 2rem;
+}
+
+.content {
+  max-width: 900px;
+  margin: 0 auto;
+  background: var(--card-bg);
+  border-radius: 16px;
+  padding: 2rem 2.25rem 2rem;
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);
+}
+
+.title {
+  margin: 0 0 1rem;
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.sectionTitle {
+  margin: 1.5rem 0 0.75rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.theoryText {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.questions {
+  margin-top: 1rem;
+}
+
+.questionList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.questionItem {
+  border-radius: 12px;
+  border: 1px solid var(--card-border);
+  padding: 1rem 1.1rem;
+}
+
+.questionText {
+  margin: 0 0 0.5rem;
+  font-weight: 500;
+}
+
+.choiceList {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.choiceLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.95rem;
+}
+
+.textarea {
+  width: 100%;
+  margin-top: 0.25rem;
+  font-size: 0.95rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--header-border);
+  background: var(--page-bg);
+  color: var(--text);
+  resize: vertical;
+}
+
+.submitBtn {
+  margin-top: 0.5rem;
+  padding: 0.45rem 1.1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #fff;
+  background: #4b5563;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.submitBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.muted {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
+.error {
+  font-size: 0.9rem;
+  color: #b91c1c;
+  margin-top: 0.5rem;
+}
+
+.correct {
+  font-size: 0.9rem;
+  color: #15803d;
+  margin-top: 0.5rem;
+}
+
+.incorrect {
+  font-size: 0.9rem;
+  color: #b45309;
+  margin-top: 0.5rem;
+}
+

@@ -53,7 +53,11 @@ export default function PlansPage() {
           ) : (
             <ul className={styles.list}>
               {plans.map((plan) => (
-                <li key={plan.id} className={styles.item}>
+                <li
+                  key={plan.id}
+                  className={styles.item}
+                  onClick={() => navigate(`/plans/${plan.id}`)}
+                >
                   <h2 className={styles.planTitle}>{plan.title}</h2>
                   {plan.description && <p className={styles.planDesc}>{plan.description}</p>}
                   <p className={styles.planMeta}>

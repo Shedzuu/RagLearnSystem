@@ -105,6 +105,28 @@ export const plansApi = {
     })
   },
 
+  async getPlan(id) {
+    return request(`/plans/${id}/`)
+  },
+
+  async getUnit(id) {
+    return request(`/units/${id}/`)
+  },
+
+  async startAttempt(planId) {
+    return request('/attempts/start/', {
+      method: 'POST',
+      body: JSON.stringify({ plan_id: planId }),
+    })
+  },
+
+  async submitAnswer(payload) {
+    return request('/answers/submit/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
   async uploadDocument(planId, file) {
     const formData = new FormData()
     formData.append('file', file)
