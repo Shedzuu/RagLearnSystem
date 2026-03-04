@@ -1,0 +1,27 @@
+# Python / Django
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# Node / frontend
+node_modules/
+dist/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# Byte-compiled / logs
+*.log
+
+# Django media (uploaded files)
+backend/media/
+
+# Docker
+*.pid
+
