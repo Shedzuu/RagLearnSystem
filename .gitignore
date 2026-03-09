@@ -22,6 +22,10 @@ dist/
 # Django media (uploaded files)
 backend/media/
 
+# Environment files
+.env
+backend/.env
+
 # Docker
 *.pid
 
