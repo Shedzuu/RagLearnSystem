@@ -153,3 +153,35 @@ export const plansApi = {
     return res.json()
   },
 }
+
+export const documentsApi = {
+  async listDocuments() {
+    return request('/documents/')
+  },
+
+  async uploadDocument(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const headers = {}
+    const access = getStoredAccess()
+    if (access) headers['Authorization'] = `Bearer ${access}`
+
+    const res = await fetch(`${API_BASE}/documents/upload/`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+    if (!res.ok) {
+      const err = new Error(res.statusText || 'Upload failed')
+      err.status = res.status
+      try {
+        err.body = await res.json()
+      } catch (_) {
+        err.body = null
+      }
+      throw err
+    }
+    return res.json()
+  },
+}

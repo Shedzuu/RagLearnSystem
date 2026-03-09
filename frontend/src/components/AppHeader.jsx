@@ -43,9 +43,14 @@ export default function AppHeader() {
         ) : (
           <>
             {user && (
-              <button type="button" onClick={() => navigate('/plans')}>
-                Plans
-              </button>
+              <>
+                <button type="button" onClick={() => navigate('/plans')}>
+                  Plans
+                </button>
+                <button type="button" onClick={() => navigate('/materials')}>
+                  Materials
+                </button>
+              </>
             )}
           </>
         )}

@@ -16,6 +16,7 @@ export default function CreatePlanPage() {
   const [error, setError] = useState('')
 
   const uploadedFile = location.state?.uploadedFile || null
+  const selectedDocumentIds = location.state?.selectedDocumentIds || []
 
   useEffect(() => {
     if (!loading && !user) navigate('/login', { state: { fromUpload: true } })
@@ -33,6 +34,10 @@ export default function CreatePlanPage() {
         } catch (_) {
           // На дипломе достаточно, если план создался; ошибку загрузки файла можно залогировать
         }
+      }
+      if (selectedDocumentIds.length) {
+        // Пока просто привязываем документы к плану на бэкенде через отдельный вызов позже
+        // TODO: реализовать attachDocuments endpoint и задействовать его здесь
       }
       navigate('/plans')
     } catch (err) {
