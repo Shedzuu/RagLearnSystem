@@ -29,7 +29,20 @@ class Plan(models.Model):
 
 
 class Document(models.Model):
-    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name="documents")
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="documents",
+        null=True,
+        blank=True,
+    )
+    plan = models.ForeignKey(
+        Plan,
+        on_delete=models.CASCADE,
+        related_name="documents",
+        null=True,
+        blank=True,
+    )
     file_path = models.CharField(max_length=500)
     original_name = models.CharField(max_length=255)
     file_size = models.IntegerField()
