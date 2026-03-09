@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import views
+from .views_documents import DocumentListView
 
 
 urlpatterns = [
@@ -11,6 +12,7 @@ urlpatterns = [
         views.PlanDocumentUploadView.as_view(),
         name="plan-document-upload",
     ),
+    path("documents/", DocumentListView.as_view(), name="document-list"),
     path("units/<int:pk>/", views.UnitDetailView.as_view(), name="unit-detail"),
     path("attempts/start/", views.StartAttemptView.as_view(), name="attempt-start"),
     path("answers/submit/", views.SubmitAnswerView.as_view(), name="answer-submit"),

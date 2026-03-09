@@ -177,6 +177,7 @@ class PlanDocumentUploadView(APIView):
         rel_path = os.path.relpath(file_path, settings.BASE_DIR)
 
         doc = Document.objects.create(
+            owner=request.user,
             plan=plan,
             file_path=rel_path,
             original_name=filename,

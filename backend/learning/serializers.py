@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Choice, Plan, Question, Section, Unit, Attempt, Answer, AnswerChoice
+from .models import Choice, Plan, Question, Section, Unit, Attempt, Answer, AnswerChoice, Document
 
 
 class ChoiceSerializer(serializers.ModelSerializer):
@@ -60,6 +60,13 @@ class UnitDetailSerializer(serializers.ModelSerializer):
       model = Unit
       fields = ("id", "title", "order", "theory", "generation_status", "section_id", "plan_id", "questions")
       read_only_fields = ("id", "generation_status", "section_id", "plan_id", "questions")
+
+
+class DocumentSerializer(serializers.ModelSerializer):
+  class Meta:
+      model = Document
+      fields = ("id", "original_name", "file_path", "file_size", "plan_id", "uploaded_at")
+      read_only_fields = ("id", "file_path", "file_size", "plan_id", "uploaded_at")
 
 
 class AnswerChoiceCreateSerializer(serializers.Serializer):
