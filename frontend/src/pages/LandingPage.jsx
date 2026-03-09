@@ -5,6 +5,7 @@ import BlockRow from '../components/BlockRow'
 import ReviewsSlider from '../components/ReviewsSlider'
 import AIChatPanel from '../components/AIChatPanel'
 import { useAuth } from '../context/AuthContext'
+import { documentsApi } from '../api/client'
 import AppHeader from '../components/AppHeader'
 import UploadingOverlay from '../components/UploadingOverlay'
 import styles from './LandingPage.module.css'
@@ -28,17 +29,23 @@ export default function LandingPage() {
   const [chatOpen, setChatOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
 
-  const handleFileSelect = (file) => {
+  const handleFileSelect = async (file) => {
     if (!user) {
       navigate('/login', { state: { fromUpload: true } })
       return
     }
-    // Залогинен — показываем анимацию загрузки и затем ведём на страницу создания плана
     setUploading(true)
-    setTimeout(() => {
+    try {
+      await documentsApi.uploadDocument(file)
+      // можно оставить короткую анимацию
+      setTimeout(() => {
+        setUploading(false)
+        navigate('/materials')
+      }, 1500)
+    } catch (_) {
       setUploading(false)
-      navigate('/create-plan', { state: { uploadedFile: file } })
-    }, 2500)
+      // на будущее можно показать ошибку пользователю
+    }
   }
 
   const scrollTo = (id) => {

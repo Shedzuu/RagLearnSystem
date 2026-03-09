@@ -12,6 +12,7 @@ export default function CreatePlanPage() {
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [goals, setGoals] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -27,14 +28,7 @@ export default function CreatePlanPage() {
     setError('')
     setSubmitting(true)
     try {
-      const plan = await plansApi.createPlan({ title: name, description })
-      if (uploadedFile) {
-        try {
-          await plansApi.uploadDocument(plan.id, uploadedFile)
-        } catch (_) {
-          // На дипломе достаточно, если план создался; ошибку загрузки файла можно залогировать
-        }
-      }
+      const plan = await plansApi.createPlan({ title: name, description, goals })
       if (selectedDocumentIds.length) {
         try {
           await plansApi.attachDocuments(plan.id, selectedDocumentIds)
@@ -78,6 +72,16 @@ export default function CreatePlanPage() {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={4}
+              />
+            </label>
+            <label className={styles.label}>
+              Learning goals (optional)
+              <textarea
+                className={styles.textarea}
+                value={goals}
+                onChange={(e) => setGoals(e.target.value)}
+                rows={3}
+                placeholder="E.g. learn loops, variables, conditionals and dictionaries from the selected materials."
               />
             </label>
             <button type="submit" className={styles.btn} disabled={submitting}>

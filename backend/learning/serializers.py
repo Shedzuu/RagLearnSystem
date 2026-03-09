@@ -38,7 +38,7 @@ class SectionSerializer(serializers.ModelSerializer):
 class PlanListSerializer(serializers.ModelSerializer):
   class Meta:
       model = Plan
-      fields = ("id", "title", "description", "generation_status", "created_at")
+      fields = ("id", "title", "description", "goals", "generation_status", "created_at")
       read_only_fields = ("id", "generation_status", "created_at")
 
 
@@ -47,7 +47,7 @@ class PlanDetailSerializer(serializers.ModelSerializer):
 
   class Meta:
       model = Plan
-      fields = ("id", "title", "description", "generation_status", "created_at", "sections")
+      fields = ("id", "title", "description", "goals", "generation_status", "created_at", "sections")
       read_only_fields = ("id", "generation_status", "created_at", "sections")
 
 

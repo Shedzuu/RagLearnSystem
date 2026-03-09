@@ -15,6 +15,7 @@ class Plan(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="plans")
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
+    goals = models.TextField(blank=True)
     generation_status = models.CharField(
         max_length=20,
         choices=GenerationStatus.choices,
