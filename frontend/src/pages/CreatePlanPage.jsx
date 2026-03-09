@@ -36,8 +36,11 @@ export default function CreatePlanPage() {
         }
       }
       if (selectedDocumentIds.length) {
-        // Пока просто привязываем документы к плану на бэкенде через отдельный вызов позже
-        // TODO: реализовать attachDocuments endpoint и задействовать его здесь
+        try {
+          await plansApi.attachDocuments(plan.id, selectedDocumentIds)
+        } catch (_) {
+          // Не критично для успешного создания плана
+        }
       }
       navigate('/plans')
     } catch (err) {

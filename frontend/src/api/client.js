@@ -152,6 +152,13 @@ export const plansApi = {
     }
     return res.json()
   },
+
+  async attachDocuments(planId, documentIds) {
+    return request(`/plans/${planId}/attach-documents/`, {
+      method: 'POST',
+      body: JSON.stringify({ document_ids: documentIds }),
+    })
+  },
 }
 
 export const documentsApi = {
