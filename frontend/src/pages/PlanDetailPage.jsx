@@ -12,6 +12,8 @@ export default function PlanDetailPage() {
   const [plan, setPlan] = useState(null)
   const [error, setError] = useState('')
   const [loadingPlan, setLoadingPlan] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [generateError, setGenerateError] = useState('')
 
   useEffect(() => {
     if (!loading && !user) navigate('/login')
@@ -38,6 +40,24 @@ export default function PlanDetailPage() {
     }
   }, [id, user])
 
+  const handleGenerate = async () => {
+    setGenerateError('')
+    setGenerating(true)
+    try {
+      const data = await plansApi.generatePlan(id)
+      setPlan(data)
+    } catch (e) {
+      setGenerateError(e.body?.detail || e.message || 'Generation failed')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const canGenerate = plan && !generating && plan.generation_status !== 'processing'
+  const showGenerateButton =
+    canGenerate &&
+    (plan.sections.length === 0 || plan.generation_status === 'failed')
+
   if (loading || !user) return null
 
   return (
@@ -50,7 +70,9 @@ export default function PlanDetailPage() {
             <p className={styles.muted}>Loading sections...</p>
           ) : error ? (
             <p className={styles.error}>{error}</p>
-          ) : !plan.sections.length ? (
+          ) : plan?.generation_status === 'processing' ? (
+            <p className={styles.muted}>Generating course...</p>
+          ) : !plan?.sections?.length ? (
             <p className={styles.muted}>This plan has no sections yet.</p>
           ) : (
             <ul className={styles.sectionList}>
@@ -80,6 +102,24 @@ export default function PlanDetailPage() {
           </p>
           {plan && plan.description && (
             <p className={styles.description}>{plan.description}</p>
+          )}
+          {showGenerateButton && (
+            <div className={styles.generateBlock}>
+              <button
+                type="button"
+                className={styles.btn}
+                onClick={handleGenerate}
+                disabled={generating}
+              >
+                {generating ? 'Generating…' : 'Generate course'}
+              </button>
+              <p className={styles.generateHint}>
+                Build sections, theory and questions from the attached materials and your goals.
+              </p>
+            </div>
+          )}
+          {generateError && (
+            <p className={styles.error}>{generateError}</p>
           )}
         </div>
       </main>

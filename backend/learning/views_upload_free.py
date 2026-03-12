@@ -36,11 +36,14 @@ class FreeDocumentUploadView(APIView):
 
         rel_path = os.path.relpath(file_path, settings.BASE_DIR)
 
-        doc = Document.objects.create(
+        # Reuse existing document record if the same file was already uploaded.
+        doc, _ = Document.objects.get_or_create(
             owner=request.user,
             file_path=rel_path,
-            original_name=filename,
-            file_size=uploaded_file.size,
+            defaults={
+                "original_name": filename,
+                "file_size": uploaded_file.size,
+            },
         )
 
         return Response(

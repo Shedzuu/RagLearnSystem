@@ -1,11 +1,15 @@
 import json
+import logging
 import os
 from pathlib import Path
 from typing import List, Dict, Any
 
 from django.conf import settings
 
-from .models import Plan, Section, Unit, Question, Choice, Document
+from .models import Plan, Section, Unit, Question, Choice
+from .services_rag import index_plan_documents, RAGService
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -28,8 +32,8 @@ class LLMClient:
                 "openai package is required for LLMClient. Install it in backend image."
             ) from exc
 
-        self._client = OpenAI(api_key=self.api_key)
-        # You can change model name here if needed
+        base_url = os.getenv("LLM_BASE_URL")  # e.g. https://openrouter.ai/api/v1
+        self._client = OpenAI(api_key=self.api_key, **({"base_url": base_url} if base_url else {}))
         self.model_name = os.getenv("LLM_MODEL", "gpt-4.1-mini")
 
     def complete_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
@@ -54,60 +58,6 @@ class LLMClient:
         return json.loads(content)
 
 
-def _load_document_text(doc: Document) -> str:
-    """
-    Very simple text loader based on file extension.
-    For диплома можно начать с plain-text и PDF с текстовым слоем,
-    а полноценный парсинг расширить позже.
-    """
-    path = Path(settings.BASE_DIR) / doc.file_path
-    suffix = path.suffix.lower()
-
-    if suffix in {".txt", ".md"}:
-        return path.read_text(encoding="utf-8", errors="ignore")
-
-    if suffix == ".pdf":
-        try:
-            import PyPDF2  # type: ignore
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("PyPDF2 is required to extract text from PDF") from exc
-        text_parts: List[str] = []
-        with path.open("rb") as f:
-            reader = PyPDF2.PdfReader(f)
-            for page in reader.pages:
-                text_parts.append(page.extract_text() or "")
-        return "\n".join(text_parts)
-
-    if suffix in {".docx"}:
-        try:
-            import docx  # type: ignore
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("python-docx is required to extract text from DOCX") from exc
-        d = docx.Document(str(path))
-        return "\n".join(p.text for p in d.paragraphs)
-
-    # Fallback: try to read as text
-    return path.read_text(encoding="utf-8", errors="ignore")
-
-
-def _build_materials_context(plan: Plan) -> str:
-    """
-    Build a text context from all documents attached to the plan.
-    For now: concatenate truncated texts with filenames.
-    """
-    parts: List[str] = []
-    for doc in plan.documents.all():
-        try:
-            text = _load_document_text(doc)
-        except Exception:
-            continue
-        # ограничиваемся первыми 4000 символами на документ, чтобы не убить модель
-        snippet = text[:4000]
-        header = f"[{doc.original_name}]"
-        parts.append(f"{header}\n{snippet}")
-    return "\n\n---\n\n".join(parts)
-
-
 def _normalize_goals_with_llm(plan: Plan, llm: LLMClient) -> List[str]:
     """
     Use LLM as a normalizer: turn free-form goals text into a list of short topics.
@@ -124,9 +74,12 @@ def _normalize_goals_with_llm(plan: Plan, llm: LLMClient) -> List[str]:
         f"{plan.goals}\n\n"
         "Extract and normalize them into 3-10 concise topics (English), without explanations."
     )
+    logger.info("[generate] Normalizing goals -> topics (LLM)...")
     data = llm.complete_json(system_prompt, user_prompt)
     topics = data.get("topics") or []
-    return [str(t).strip() for t in topics if str(t).strip()]
+    result = [str(t).strip() for t in topics if str(t).strip()]
+    logger.info("[generate] Topics: %s", result)
+    return result
 
 
 def _generate_course_structure_with_llm(plan: Plan, context: str, topics: List[str], llm: LLMClient) -> Dict[str, Any]:
@@ -172,6 +125,7 @@ def _generate_course_structure_with_llm(plan: Plan, context: str, topics: List[s
         "Ensure JSON is valid and does not contain comments."
     )
 
+    logger.info("[generate] Asking LLM for course structure (sections/units/questions)...")
     return llm.complete_json(system_prompt, user_prompt)
 
 
@@ -183,23 +137,26 @@ def generate_plan_from_documents(plan: Plan) -> None:
     """
     llm = LLMClient()
 
-    # 1) Build context from documents
-    context = _build_materials_context(plan)
-    if not context:
-        raise RuntimeError("No text could be extracted from plan documents")
+    logger.info("[generate] Step 1/4: Indexing plan documents (chunks + embeddings)...")
+    index_plan_documents(plan)
 
-    # 2) Normalize goals -> topics
+    logger.info("[generate] Step 2/4: Normalizing goals -> topics...")
     topics = _normalize_goals_with_llm(plan, llm)
 
-    # 3) Ask LLM for course structure
+    logger.info("[generate] Step 3/4: Building RAG context from chunks...")
+    rag = RAGService()
+    context = rag.build_context_for_topics(plan, topics)
+    if not context:
+        raise RuntimeError("No context could be built from plan documents")
+    logger.info("[generate] RAG context length: %s chars", len(context))
+
+    logger.info("[generate] Step 4/4: Generating course structure with LLM...")
     structure = _generate_course_structure_with_llm(plan, context, topics, llm)
 
     sections_data: List[Dict[str, Any]] = structure.get("sections") or []
+    logger.info("[generate] Persisting: %s sections", len(sections_data))
 
-    # 4) Wipe previous structure
     plan.sections.all().delete()
-
-    # 5) Persist new structure
     for s_idx, s in enumerate(sections_data, start=1):
         section = Section.objects.create(
             plan=plan,
@@ -247,7 +204,7 @@ def generate_plan_from_documents(plan: Plan) -> None:
                             order=c_idx,
                         )
 
-    # 6) Update plan status
     plan.generation_status = Plan.GenerationStatus.READY
     plan.save(update_fields=["generation_status"])
+    logger.info("[generate] Plan status set to READY.")
 

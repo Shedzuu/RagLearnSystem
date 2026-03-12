@@ -49,7 +49,18 @@ class AttachDocumentsToPlanView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Detach documents already bound to OTHER plans before re-attaching.
         docs.update(plan=plan)
+        # Remove duplicate file_path records attached to this plan (keep lowest id).
+        from django.db.models import Min
+        dupes_qs = (
+            Document.objects.filter(plan=plan)
+            .values("file_path")
+            .annotate(min_id=Min("id"))
+            .filter(file_path__in=Document.objects.filter(plan=plan).values("file_path"))
+        )
+        keep_ids = [row["min_id"] for row in dupes_qs]
+        Document.objects.filter(plan=plan).exclude(id__in=keep_ids).delete()
 
         serialized = DocumentSerializer(docs, many=True)
         return Response(serialized.data, status=status.HTTP_200_OK)

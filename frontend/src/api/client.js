@@ -98,10 +98,10 @@ export const plansApi = {
     return request('/plans/')
   },
 
-  async createPlan({ title, description }) {
+  async createPlan({ title, description, goals }) {
     return request('/plans/', {
       method: 'POST',
-      body: JSON.stringify({ title, description }),
+      body: JSON.stringify({ title, description, goals: goals || '' }),
     })
   },
 
@@ -157,6 +157,12 @@ export const plansApi = {
     return request(`/plans/${planId}/attach-documents/`, {
       method: 'POST',
       body: JSON.stringify({ document_ids: documentIds }),
+    })
+  },
+
+  async generatePlan(planId) {
+    return request(`/plans/${planId}/generate/`, {
+      method: 'POST',
     })
   },
 }

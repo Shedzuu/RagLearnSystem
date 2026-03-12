@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -5,6 +7,8 @@ from rest_framework.views import APIView
 from .models import Plan
 from .serializers import PlanDetailSerializer
 from .services_generation import generate_plan_from_documents
+
+logger = logging.getLogger(__name__)
 
 
 class PlanGenerateView(APIView):
@@ -31,12 +35,14 @@ class PlanGenerateView(APIView):
             )
 
         try:
-            # mark as processing
             plan.generation_status = Plan.GenerationStatus.PROCESSING
             plan.save(update_fields=["generation_status"])
+            logger.info("[generate] Plan %s: starting generation (documents=%s)", plan_id, plan.documents.count())
 
             generate_plan_from_documents(plan)
+            logger.info("[generate] Plan %s: generation completed successfully", plan_id)
         except Exception as exc:
+            logger.exception("[generate] Plan %s: generation failed", plan_id)
             plan.generation_status = Plan.GenerationStatus.FAILED
             plan.save(update_fields=["generation_status"])
             return Response(

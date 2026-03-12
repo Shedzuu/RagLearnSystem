@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from pgvector.django import VectorField
 
 
 User = settings.AUTH_USER_MODEL
@@ -312,4 +313,31 @@ class AiChatMessage(models.Model):
 
     def __str__(self) -> str:
         return f"{self.role}: {self.content[:50]}"
+
+
+class Chunk(models.Model):
+    """
+    Text chunk from a plan document with vector embedding for RAG.
+    """
+
+    plan = models.ForeignKey(
+        Plan, on_delete=models.CASCADE, related_name="chunks"
+    )
+    document = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="chunks"
+    )
+    content = models.TextField()
+    page_number = models.IntegerField(null=True, blank=True)
+    chunk_index = models.IntegerField()
+    start_char = models.IntegerField(null=True, blank=True)
+    end_char = models.IntegerField(null=True, blank=True)
+    embedding = VectorField(dimensions=1024, null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["plan", "document", "chunk_index"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Chunk {self.chunk_index} for {self.document_id}"
 
