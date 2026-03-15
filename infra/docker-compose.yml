@@ -23,6 +23,7 @@ services:
     volumes:
       - ../backend:/app
       - backend_media:/app/media
+      - hf_cache:/root/.cache/huggingface
     ports:
       - "8000:8000"
     environment:
@@ -69,4 +70,5 @@ services:
 volumes:
   diploma_pg_data:
   backend_media:
+  hf_cache:
 
