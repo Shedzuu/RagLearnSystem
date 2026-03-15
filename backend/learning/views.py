@@ -24,6 +24,7 @@ from .serializers import (
     UnitDetailSerializer,
     AnswerCreateSerializer,
 )
+from .services_generation import LLMClient
 
 
 class PlanListCreateView(generics.ListCreateAPIView):
@@ -133,6 +134,49 @@ class SubmitAnswerView(APIView):
             is_correct = selected_ids == correct_ids and bool(correct_ids)
             answer.is_correct = is_correct
             answer.earned_points = question.points if is_correct else 0
+        elif question.type in {
+            Question.QuestionType.OPEN_TEXT,
+            Question.QuestionType.CODE,
+        }:
+            # LLM grading for open_text/code, grounded by unit theory.
+            user_answer = (
+                answer.code_answer
+                if question.type == Question.QuestionType.CODE
+                else answer.text_answer
+            ).strip()
+            if user_answer:
+                llm = LLMClient()
+                unit = question.unit
+                system_prompt = (
+                    "You are a strict tutor and grader. "
+                    "Grade the student's answer using ONLY the provided theory context. "
+                    "Return a JSON object with fields: "
+                    "'score' (number 0..1), 'is_correct' (boolean), "
+                    "'correct_answer' (string), 'feedback' (string). "
+                    "Be concise, specific, and cite what part of theory applies. "
+                    "If theory is insufficient to judge, set score=0, is_correct=false "
+                    "and explain what is missing."
+                )
+                user_prompt = (
+                    f"THEORY CONTEXT:\n{unit.theory}\n\n"
+                    f"QUESTION:\n{question.text}\n\n"
+                    f"STUDENT ANSWER:\n{user_answer}\n\n"
+                    "Now return JSON."
+                )
+                data = llm.complete_json(system_prompt, user_prompt)
+                score = float(data.get("score") or 0.0)
+                if score < 0:
+                    score = 0.0
+                if score > 1:
+                    score = 1.0
+                is_correct = bool(data.get("is_correct")) or score >= 0.8
+
+                answer.is_correct = is_correct
+                answer.earned_points = (question.points or 1) * score
+                answer.feedback_text = str(data.get("feedback") or "").strip()
+                correct_answer = str(data.get("correct_answer") or "").strip()
+            else:
+                correct_answer = ""
 
         answer.save()
 
@@ -141,6 +185,8 @@ class SubmitAnswerView(APIView):
                 "answer_id": answer.id,
                 "is_correct": answer.is_correct,
                 "earned_points": answer.earned_points,
+                "feedback_text": answer.feedback_text,
+                "correct_answer": correct_answer if question.type in {Question.QuestionType.OPEN_TEXT, Question.QuestionType.CODE} else "",
             },
             status=status.HTTP_200_OK,
         )

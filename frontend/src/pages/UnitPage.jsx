@@ -102,6 +102,8 @@ export default function UnitPage() {
         lastResult: {
           is_correct: result.is_correct,
           earned_points: result.earned_points,
+          feedback_text: result.feedback_text || '',
+          correct_answer: result.correct_answer || '',
         },
       })
     } catch (e) {
@@ -201,9 +203,9 @@ export default function UnitPage() {
                                   ? 'Write your code here...'
                                   : 'Write your answer here...'
                               }
-                              value={qState.textAnswer || ''}
+                              value={q.type === 'code' ? qState.codeAnswer || '' : qState.textAnswer || ''}
                               onChange={(e) =>
-                                updateAnswerState(q.id, { textAnswer: e.target.value })
+                                updateAnswerState(q.id, q.type === 'code' ? { codeAnswer: e.target.value } : { textAnswer: e.target.value })
                               }
                             />
                           )}
@@ -216,21 +218,35 @@ export default function UnitPage() {
                             Submit answer
                           </button>
                           {qState.lastResult && (
-                            <p
-                              className={
-                                qState.lastResult.error
-                                  ? styles.error
+                            <>
+                              <p
+                                className={
+                                  qState.lastResult.error
+                                    ? styles.error
+                                    : qState.lastResult.is_correct
+                                    ? styles.correct
+                                    : styles.incorrect
+                                }
+                              >
+                                {qState.lastResult.error
+                                  ? qState.lastResult.error
                                   : qState.lastResult.is_correct
-                                  ? styles.correct
-                                  : styles.incorrect
-                              }
-                            >
-                              {qState.lastResult.error
-                                ? qState.lastResult.error
-                                : qState.lastResult.is_correct
-                                ? 'Correct!'
-                                : 'Incorrect.'}
-                            </p>
+                                  ? 'Correct!'
+                                  : 'Incorrect.'}
+                              </p>
+                              {qState.lastResult.correct_answer && (
+                                <div className={styles.feedbackBox}>
+                                  <div className={styles.feedbackTitle}>Correct answer</div>
+                                  <pre className={styles.feedbackPre}>{qState.lastResult.correct_answer}</pre>
+                                </div>
+                              )}
+                              {qState.lastResult.feedback_text && (
+                                <div className={styles.feedbackBox}>
+                                  <div className={styles.feedbackTitle}>Feedback</div>
+                                  <p className={styles.feedbackText}>{qState.lastResult.feedback_text}</p>
+                                </div>
+                              )}
+                            </>
                           )}
                         </li>
                       )
