@@ -1,0 +1,42 @@
+name: Deploy to server
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p 2222 212.134.241.141 >> ~/.ssh/known_hosts
+
+      - name: Sync project to server
+        run: |
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -p 2222" ./ \
+            mluser@212.134.241.141:/home/mluser/diploma
+
+      - name: Deploy with Docker Compose
+        run: |
+          ssh -i ~/.ssh/deploy_key -p 2222 mluser@212.134.241.141 << EOF
+            set -e
+            export PROD_POSTGRES_DB='${{ secrets.PROD_POSTGRES_DB }}'
+            export PROD_POSTGRES_USER='${{ secrets.PROD_POSTGRES_USER }}'
+            export PROD_POSTGRES_PASSWORD='${{ secrets.PROD_POSTGRES_PASSWORD }}'
+            export PROD_JWT_SECRET_KEY='${{ secrets.PROD_JWT_SECRET_KEY }}'
+            export PROD_LLM_API_KEY='${{ secrets.PROD_LLM_API_KEY }}'
+            export PROD_LLM_BASE_URL='${{ secrets.PROD_LLM_BASE_URL }}'
+            export PROD_LLM_MODEL='${{ secrets.PROD_LLM_MODEL }}'
+            cd ~/diploma/infra
+            docker compose -f docker-compose.yml pull
+            docker compose -f docker-compose.yml up -d --build
+          EOF
+
