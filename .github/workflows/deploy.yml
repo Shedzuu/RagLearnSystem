@@ -22,7 +22,7 @@ jobs:
       - name: Sync project to server
         run: |
           rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -p 2222" ./ \
-            mluser@212.134.241.141:/home/mluser/diploma
+            mluser@212.134.241.141:/home/mluser/test
 
       - name: Deploy with Docker Compose
         run: |
@@ -35,7 +35,7 @@ jobs:
             export PROD_LLM_API_KEY='${{ secrets.PROD_LLM_API_KEY }}'
             export PROD_LLM_BASE_URL='${{ secrets.PROD_LLM_BASE_URL }}'
             export PROD_LLM_MODEL='${{ secrets.PROD_LLM_MODEL }}'
-            cd ~/diploma/infra
+            cd ~/test/infra
             docker compose -f docker-compose.yml pull
             docker compose -f docker-compose.yml up -d --build
           EOF
