@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from .models import Plan
 from .serializers import PlanDetailSerializer
 from .services_generation import generate_plan_from_documents
+from .services_rag import InsufficientCoverageError
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,28 @@ class PlanGenerateView(APIView):
 
             generate_plan_from_documents(plan)
             logger.info("[generate] Plan %s: generation completed successfully", plan_id)
+        except InsufficientCoverageError as exc:
+            logger.warning("[generate] Plan %s: insufficient coverage: %s", plan_id, exc)
+            plan.generation_status = Plan.GenerationStatus.FAILED
+            plan.save(update_fields=["generation_status"])
+            return Response(
+                {
+                    "detail": (
+                        "По загруженным материалам недостаточно информации для некоторых целей обучения. "
+                        f"{exc}"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except Exception as exc:
             logger.exception("[generate] Plan %s: generation failed", plan_id)
             plan.generation_status = Plan.GenerationStatus.FAILED
             plan.save(update_fields=["generation_status"])
             return Response(
-                {"detail": f"Generation failed: {exc}"},
+                {
+                    "detail": "LLM сервис временно недоступен или вернул ошибку. "
+                    "Попробуйте запустить генерацию ещё раз чуть позже."
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

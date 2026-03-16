@@ -29,5 +29,6 @@ urlpatterns = [
     path("units/<int:pk>/", views.UnitDetailView.as_view(), name="unit-detail"),
     path("attempts/start/", views.StartAttemptView.as_view(), name="attempt-start"),
     path("answers/submit/", views.SubmitAnswerView.as_view(), name="answer-submit"),
+    path("attempts/finish/", views.FinishAttemptView.as_view(), name="attempt-finish"),
 ]
 

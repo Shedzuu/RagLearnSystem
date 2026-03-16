@@ -127,6 +127,17 @@ export const plansApi = {
     })
   },
 
+  async finishAttempt(attemptId, { sectionId = null, unitId = null } = {}) {
+    return request('/attempts/finish/', {
+      method: 'POST',
+      body: JSON.stringify({
+        attempt_id: attemptId,
+        section_id: sectionId,
+        unit_id: unitId,
+      }),
+    })
+  },
+
   async uploadDocument(planId, file) {
     const formData = new FormData()
     formData.append('file', file)

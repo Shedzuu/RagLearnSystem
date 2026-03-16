@@ -1,7 +1,10 @@
 import os
 
 from django.conf import settings
+from django.db.models import Sum, Count, F
+from django.db.models.functions import NullIf
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
@@ -17,6 +20,9 @@ from .models import (
     Answer,
     AnswerChoice,
     Document,
+    UnitProgress,
+    SectionProgress,
+    QuestionStats,
 )
 from .serializers import (
     PlanListSerializer,
@@ -78,6 +84,19 @@ class StartAttemptView(APIView):
         enrollment, _ = Enrollment.objects.get_or_create(
             user=request.user, plan=plan
         )
+        # Переиспользуем активную попытку, чтобы не терять ответы
+        # при переходах между юнитами в рамках одной сессии обучения.
+        attempt = (
+            Attempt.objects.filter(
+                enrollment=enrollment,
+                finished_at__isnull=True,
+            )
+            .order_by("-started_at")
+            .first()
+        )
+        if attempt:
+            return Response({"attempt_id": attempt.id}, status=status.HTTP_200_OK)
+
         attempt = Attempt.objects.create(enrollment=enrollment)
         return Response({"attempt_id": attempt.id}, status=status.HTTP_201_CREATED)
 
@@ -187,6 +206,179 @@ class SubmitAnswerView(APIView):
                 "earned_points": answer.earned_points,
                 "feedback_text": answer.feedback_text,
                 "correct_answer": correct_answer if question.type in {Question.QuestionType.OPEN_TEXT, Question.QuestionType.CODE} else "",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class FinishAttemptView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        attempt_id = request.data.get("attempt_id")
+        section_id = request.data.get("section_id")
+        unit_id = request.data.get("unit_id")
+        if not attempt_id:
+            return Response(
+                {"detail": "attempt_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not section_id and not unit_id:
+            return Response(
+                {"detail": "section_id or unit_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        attempt = get_object_or_404(
+            Attempt,
+            id=attempt_id,
+            enrollment__user=request.user,
+        )
+        enrollment = attempt.enrollment
+
+        answers_filter = {"attempt": attempt}
+        if unit_id:
+            # Приоритетно считаем по одному юниту (UI-странице), если передан unit_id.
+            answers_filter["question__unit_id"] = unit_id
+        else:
+            answers_filter["question__unit__section_id"] = section_id
+
+        answers_qs = Answer.objects.filter(**answers_filter).select_related(
+            "question__unit__section"
+        )
+        if not answers_qs.exists():
+            return Response(
+                {
+                    "attempt_id": attempt.id,
+                    "score_percent": 0.0,
+                    "correct_count": 0,
+                    "total_questions": 0,
+                    "earned_points": 0.0,
+                    "max_points": 0.0,
+                    "unit_progress": [],
+                    "section_progress": [],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        question_ids = answers_qs.values_list("question_id", flat=True).distinct()
+        questions = Question.objects.filter(id__in=question_ids)
+
+        max_points = float(questions.aggregate(total=Sum("points"))["total"] or 0.0)
+        earned_points = float(
+            answers_qs.aggregate(total=Sum("earned_points"))["total"] or 0.0
+        )
+        correct_count = answers_qs.filter(is_correct=True).count()
+        total_questions = questions.count()
+
+        score_percent = 0.0
+        if max_points > 0:
+            score_percent = (earned_points / max_points) * 100.0
+
+        attempt.score = score_percent
+        attempt.finished_at = timezone.now()
+        attempt.save(update_fields=["score", "finished_at"])
+
+        now = timezone.now()
+        for ans in answers_qs:
+            q = ans.question
+            stats, _ = QuestionStats.objects.get_or_create(
+                enrollment=enrollment,
+                question=q,
+            )
+            stats.attempts_count = F("attempts_count") + 1
+            if ans.is_correct:
+                stats.correct_count = F("correct_count") + 1
+            stats.last_attempt_at = now
+            stats.save(update_fields=["attempts_count", "correct_count", "last_attempt_at"])
+
+        stats_qs = QuestionStats.objects.filter(
+            enrollment=enrollment, question_id__in=question_ids
+        )
+        stats_qs.update(
+            success_rate=100.0 * F("correct_count") / NullIf(F("attempts_count"), 0)
+        )
+
+        # Все юниты внутри секции, по которым есть вопросы в этой попытке.
+        unit_ids = questions.values_list("unit_id", flat=True).distinct()
+
+        unit_progress_payload = []
+        for unit in Unit.objects.filter(id__in=unit_ids).select_related("section"):
+            total_q_in_unit = Question.objects.filter(unit=unit).count()
+            if total_q_in_unit == 0:
+                progress_percent = 0.0
+            else:
+                answered_count = (
+                    Answer.objects.filter(
+                        attempt__enrollment=enrollment,
+                        question__unit=unit,
+                    )
+                    .values("question_id")
+                    .distinct()
+                    .count()
+                )
+                progress_percent = (answered_count / total_q_in_unit) * 100.0
+
+            unit_progress_obj, _ = UnitProgress.objects.get_or_create(
+                enrollment=enrollment,
+                unit=unit,
+            )
+            unit_progress_obj.progress_percent = progress_percent
+            unit_progress_obj.completed = progress_percent >= 99.9
+            unit_progress_obj.save(update_fields=["progress_percent", "completed"])
+
+            unit_progress_payload.append(
+                {
+                    "unit_id": unit.id,
+                    "section_id": unit.section_id,
+                    "progress_percent": progress_percent,
+                    "completed": unit_progress_obj.completed,
+                }
+            )
+
+        section_progress_payload = []
+        sections = {u.section for u in Unit.objects.filter(id__in=unit_ids).select_related("section")}
+        for section in sections:
+            unit_progress_qs = UnitProgress.objects.filter(
+                enrollment=enrollment,
+                unit__section=section,
+            )
+            if not unit_progress_qs.exists():
+                progress_percent = 0.0
+                completed = False
+            else:
+                agg = unit_progress_qs.aggregate(
+                    avg_progress=Sum("progress_percent") / Count("id"),
+                )
+                progress_percent = float(agg["avg_progress"] or 0.0)
+                completed = unit_progress_qs.filter(completed=True).count() == unit_progress_qs.count()
+
+            section_progress_obj, _ = SectionProgress.objects.get_or_create(
+                enrollment=enrollment,
+                section=section,
+            )
+            section_progress_obj.progress_percent = progress_percent
+            section_progress_obj.completed = completed
+            section_progress_obj.save(update_fields=["progress_percent", "completed"])
+
+            section_progress_payload.append(
+                {
+                    "section_id": section.id,
+                    "progress_percent": progress_percent,
+                    "completed": completed,
+                }
+            )
+
+        return Response(
+            {
+                "attempt_id": attempt.id,
+                "score_percent": score_percent,
+                "correct_count": correct_count,
+                "total_questions": total_questions,
+                "earned_points": earned_points,
+                "max_points": max_points,
+                "unit_progress": unit_progress_payload,
+                "section_progress": section_progress_payload,
             },
             status=status.HTTP_200_OK,
         )

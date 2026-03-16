@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 MAX_CHUNKS_PER_PLAN = 5000
+# Для оценки покрытости целей материалами
+MIN_CHUNKS_PER_TOPIC = 2
 # Защита от «раздутого» текста из docx/pdf (служебные данные, повторы)
 MAX_CHARS_PER_DOCUMENT = 300_000
 
@@ -185,6 +187,12 @@ def index_plan_documents(plan: Plan) -> None:
 from pgvector.django import CosineDistance  # noqa E402
 
 
+class InsufficientCoverageError(Exception):
+    """
+    Raised when RAG cannot find enough relevant chunks for requested topics.
+    """
+
+
 class RAGService:
     """
     High-level API for retrieving relevant chunks for a plan.
@@ -215,6 +223,7 @@ class RAGService:
         """
         chunks_by_id: Dict[int, str] = {}
         order: List[int] = []
+        topic_chunk_counts: Dict[str, int] = {}
 
         if not topics:
             # Fallback: take first N chunks by order if no explicit goals.
@@ -224,13 +233,38 @@ class RAGService:
                 order.append(ch.id)
         else:
             for topic in topics:
+                count_for_topic = 0
                 for ch in self.search_similar_chunks(plan, topic, top_k=top_k_per_topic):
                     if ch.id not in chunks_by_id:
                         chunks_by_id[ch.id] = self._format_chunk(ch, topic=topic)
                         order.append(ch.id)
+                        count_for_topic += 1
+                topic_chunk_counts[topic] = count_for_topic
 
         if not order:
-            return ""
+            # нет ни одного релевантного чанка вообще
+            raise InsufficientCoverageError(
+                "В загруженных материалах не найдено ни одного релевантного фрагмента "
+                "для указанных целей обучения."
+            )
+
+        # проверяем покрытие по темам
+        if topics:
+            poor_topics = [
+                topic
+                for topic in topics
+                if topic_chunk_counts.get(topic, 0) < MIN_CHUNKS_PER_TOPIC
+            ]
+            if poor_topics:
+                logger.warning(
+                    "[RAG] Insufficient coverage for topics: %s (counts=%s)",
+                    poor_topics,
+                    {t: topic_chunk_counts.get(t, 0) for t in topics},
+                )
+                raise InsufficientCoverageError(
+                    "По следующим целям в материалах очень мало или совсем нет информации: "
+                    + "; ".join(poor_topics)
+                )
 
         parts: List[str] = []
         total_len = 0

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -44,18 +45,32 @@ class LLMClient:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-
-        resp = self._client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=0.2,
-        )
-
-        content = resp.choices[0].message.content
-        if not content:
-            raise RuntimeError("Empty response from LLM")
-        return json.loads(content)
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                resp = self._client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.2,
+                )
+                content = resp.choices[0].message.content
+                if not content:
+                    raise RuntimeError("Empty response from LLM")
+                return json.loads(content)
+            except Exception as exc:  # pragma: no cover - network/runtime errors
+                last_exc = exc
+                wait_s = 2 * (attempt + 1)
+                logger.warning(
+                    "[generate] LLM call failed on attempt %s/3: %s. Retrying in %ss...",
+                    attempt + 1,
+                    exc,
+                    wait_s,
+                )
+                time.sleep(wait_s)
+        # Если все попытки провалились — пробрасываем последнее исключение
+        assert last_exc is not None
+        raise last_exc
 
 
 def _normalize_goals_with_llm(plan: Plan, llm: LLMClient) -> List[str]:

@@ -5,6 +5,32 @@ import { useAuth } from '../context/AuthContext'
 import { plansApi } from '../api/client'
 import styles from './UnitPage.module.css'
 
+function getUnitStateKey(planId, unitId) {
+  return `diploma_unit_state_${planId}_${unitId}`
+}
+
+function readUnitState(planId, unitId) {
+  if (!planId || !unitId) return null
+  try {
+    const raw = localStorage.getItem(getUnitStateKey(planId, unitId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') return parsed
+    return null
+  } catch (_) {
+    return null
+  }
+}
+
+function writeUnitState(planId, unitId, state) {
+  if (!planId || !unitId) return
+  try {
+    localStorage.setItem(getUnitStateKey(planId, unitId), JSON.stringify(state))
+  } catch (_) {
+    // ignore quota/storage errors
+  }
+}
+
 export default function UnitPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -13,6 +39,9 @@ export default function UnitPage() {
   const [plan, setPlan] = useState(null)
   const [attemptId, setAttemptId] = useState(null)
   const [answersState, setAnswersState] = useState({})
+  const [unitResult, setUnitResult] = useState(null)
+  const [hasFinished, setHasFinished] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [loadingUnit, setLoadingUnit] = useState(true)
   const [loadingPlan, setLoadingPlan] = useState(false)
@@ -31,9 +60,24 @@ export default function UnitPage() {
         const data = await plansApi.getUnit(id)
         if (cancelled) return
         setUnit(data)
-        // Start attempt for this plan if needed
-        const attempt = await plansApi.startAttempt(data.plan_id)
-        if (!cancelled) setAttemptId(attempt.attempt_id)
+        const cachedState = readUnitState(data.plan_id, data.id)
+        if (cachedState && cachedState.unitId === data.id) {
+          setAnswersState(cachedState.answersState || {})
+          setUnitResult(cachedState.unitResult || null)
+          setHasFinished(Boolean(cachedState.hasFinished))
+          setAttemptId(cachedState.attemptId || null)
+        } else {
+          setAnswersState({})
+          setUnitResult(null)
+          setHasFinished(false)
+          setAttemptId(null)
+        }
+
+        // Запрашиваем попытку только если секция ещё не завершена.
+        if (!cachedState?.hasFinished || !cachedState?.attemptId) {
+          const attempt = await plansApi.startAttempt(data.plan_id)
+          if (!cancelled) setAttemptId(attempt.attempt_id)
+        }
       } catch (e) {
         if (!cancelled) setError('Failed to load unit')
       } finally {
@@ -67,6 +111,18 @@ export default function UnitPage() {
     }
   }, [user, unit])
 
+  // Персистим состояние текущей секции, чтобы ответы и результат не исчезали.
+  useEffect(() => {
+    if (!unit) return
+    writeUnitState(unit.plan_id, unit.id, {
+      unitId: unit.id,
+      attemptId,
+      answersState,
+      unitResult,
+      hasFinished,
+    })
+  }, [unit, attemptId, answersState, unitResult, hasFinished])
+
   const updateAnswerState = (questionId, update) => {
     setAnswersState((prev) => ({
       ...prev,
@@ -86,30 +142,88 @@ export default function UnitPage() {
     }
   }
 
-  const submitAnswer = async (question) => {
-    if (!attemptId) return
-    const qState = answersState[question.id] || {}
-    const payload = {
-      attempt_id: attemptId,
-      question_id: question.id,
-      text_answer: qState.textAnswer || '',
-      code_answer: qState.codeAnswer || '',
-      selected_choices: (qState.selectedChoices || []).map((choiceId) => ({ choice_id: choiceId })),
-    }
+  const handleSubmitUnit = async () => {
+    if (!attemptId || !unit || !unit.questions.length || submitting) return
+    setSubmitting(true)
+    setError('')
     try {
-      const result = await plansApi.submitAnswer(payload)
-      updateAnswerState(question.id, {
-        lastResult: {
-          is_correct: result.is_correct,
-          earned_points: result.earned_points,
-          feedback_text: result.feedback_text || '',
-          correct_answer: result.correct_answer || '',
-        },
+      const results = await Promise.all(
+        unit.questions.map(async (question) => {
+          const qState = answersState[question.id] || {}
+          const payload = {
+            attempt_id: attemptId,
+            question_id: question.id,
+            text_answer: qState.textAnswer || '',
+            code_answer: qState.codeAnswer || '',
+            selected_choices: (qState.selectedChoices || []).map((choiceId) => ({
+              choice_id: choiceId,
+            })),
+          }
+          const result = await plansApi.submitAnswer(payload)
+          updateAnswerState(question.id, {
+            lastResult: {
+              is_correct: result.is_correct,
+              earned_points: result.earned_points,
+              feedback_text: result.feedback_text || '',
+              correct_answer: result.correct_answer || '',
+            },
+          })
+          return { question, result }
+        })
+      )
+
+      const totalQuestions = unit.questions.length
+      const correctCount = results.filter((r) => r.result.is_correct).length
+      const earnedPoints = results.reduce(
+        (sum, r) => sum + (r.result.earned_points || 0),
+        0
+      )
+      const maxPoints = unit.questions.reduce((sum, q) => sum + (q.points || 0), 0)
+      const scorePercent = maxPoints > 0 ? (earnedPoints / maxPoints) * 100 : 0
+
+      const summary = await plansApi.finishAttempt(attemptId, {
+        unitId: unit.id,
+        sectionId: unit.section_id,
+      })
+
+      setUnitResult({
+        unitId: unit.id,
+        scorePercent: summary.score_percent ?? scorePercent,
+        correctCount: summary.correct_count ?? correctCount,
+        totalQuestions: summary.total_questions ?? totalQuestions,
+        earnedPoints: summary.earned_points ?? earnedPoints,
+        maxPoints: summary.max_points ?? maxPoints,
+        raw: summary,
+      })
+      setHasFinished(true)
+    } catch (e) {
+      setError('Failed to submit unit answers')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleRetryUnit = async () => {
+    if (!user || !unit) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const attempt = await plansApi.startAttempt(unit.plan_id)
+      setAttemptId(attempt.attempt_id)
+      setAnswersState({})
+      setUnitResult(null)
+      setHasFinished(false)
+      writeUnitState(unit.plan_id, unit.id, {
+        unitId: unit.id,
+        attemptId: attempt.attempt_id,
+        answersState: {},
+        unitResult: null,
+        hasFinished: false,
       })
     } catch (e) {
-      updateAnswerState(question.id, {
-        lastResult: { error: 'Failed to submit answer' },
-      })
+      setError('Failed to start a new attempt')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -209,14 +323,6 @@ export default function UnitPage() {
                               }
                             />
                           )}
-                          <button
-                            type="button"
-                            className={styles.submitBtn}
-                            onClick={() => submitAnswer(q)}
-                            disabled={!attemptId}
-                          >
-                            Submit answer
-                          </button>
                           {qState.lastResult && (
                             <>
                               <p
@@ -252,6 +358,55 @@ export default function UnitPage() {
                       )
                     })}
                   </ul>
+                  <div className={styles.unitActions}>
+                    {!hasFinished ? (
+                      <button
+                        type="button"
+                        className={styles.submitBtnPrimary}
+                        onClick={handleSubmitUnit}
+                        disabled={!attemptId || submitting}
+                      >
+                        {submitting ? 'Submitting...' : 'Submit answers'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.retryBtn}
+                        onClick={handleRetryUnit}
+                        disabled={submitting}
+                      >
+                        {submitting ? 'Starting...' : 'Retry unit'}
+                      </button>
+                    )}
+                    {unitResult && unitResult.unitId === unit.id && (
+                      <div className={styles.unitResult}>
+                        <div className={styles.unitResultHeader}>Unit result</div>
+                        <div className={styles.unitResultScore}>
+                          You scored{' '}
+                          <strong>
+                            {Math.round(unitResult.earnedPoints * 10) / 10}/
+                            {Math.round(unitResult.maxPoints * 10) / 10}
+                          </strong>{' '}
+                          ({Math.round(unitResult.scorePercent)}%)
+                        </div>
+                        <div className={styles.unitResultMeta}>
+                          Correct {unitResult.correctCount} out of{' '}
+                          {unitResult.totalQuestions}
+                        </div>
+                        <div
+                          className={
+                            unitResult.scorePercent >= 70
+                              ? styles.unitResultPassed
+                              : styles.unitResultTryAgain
+                          }
+                        >
+                          {unitResult.scorePercent >= 70
+                            ? 'Passed'
+                            : 'Try again'}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </section>
               )}
             </>
