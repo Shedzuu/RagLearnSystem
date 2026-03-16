@@ -36,7 +36,7 @@ jobs:
             export PROD_LLM_BASE_URL='${{ secrets.PROD_LLM_BASE_URL }}'
             export PROD_LLM_MODEL='${{ secrets.PROD_LLM_MODEL }}'
             cd ~/test/infra
-            docker compose -f docker-compose.yml pull
-            docker compose -f docker-compose.yml up -d --build
+            docker compose -p test -f docker-compose.yml pull
+            docker compose -p test -f docker-compose.yml up -d --build
           EOF
 
