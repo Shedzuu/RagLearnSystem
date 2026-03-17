@@ -148,6 +148,29 @@ export const plansApi = {
     return request(`/plans/${planId}/progress/`)
   },
 
+  async sendAiChat({ unitId, questionId, message, history }) {
+    return request('/ai/chat/', {
+      method: 'POST',
+      body: JSON.stringify({
+        unit_id: unitId,
+        question_id: questionId || null,
+        message,
+        history: history || [],
+      }),
+    })
+  },
+
+  async sendLandingChat({ message, history }) {
+    return request('/ai/landing-chat/', {
+      method: 'POST',
+      skipAuth: true,
+      body: JSON.stringify({
+        message,
+        history: history || [],
+      }),
+    })
+  },
+
   async uploadDocument(planId, file) {
     const formData = new FormData()
     formData.append('file', file)

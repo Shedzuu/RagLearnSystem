@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import AppHeader from '../components/AppHeader'
+import AIChatPanel from '../components/AIChatPanel'
 import { useAuth } from '../context/AuthContext'
 import { plansApi } from '../api/client'
 import styles from './UnitPage.module.css'
@@ -20,6 +21,7 @@ export default function UnitPage() {
   const [error, setError] = useState('')
   const [loadingUnit, setLoadingUnit] = useState(true)
   const [loadingPlan, setLoadingPlan] = useState(false)
+  const [aiQuestionContext, setAiQuestionContext] = useState(null)
 
   useEffect(() => {
     if (!loading && !user) navigate('/login')
@@ -32,6 +34,7 @@ export default function UnitPage() {
       setLoadingUnit(true)
       setLoadingPlan(true)
       setError('')
+      setAiQuestionContext(null)
       try {
         const data = await plansApi.getUnit(id)
         if (cancelled) return
@@ -297,6 +300,7 @@ export default function UnitPage() {
         </aside>
 
         <section className={styles.content}>
+          <div className={styles.contentInner}>
           {loadingUnit ? (
             <p className={styles.muted}>Loading unit...</p>
           ) : error ? (
@@ -318,7 +322,20 @@ export default function UnitPage() {
                       const qState = answersState[q.id] || {}
                       return (
                         <li key={q.id} className={styles.questionItem}>
-                          <p className={styles.questionText}>{q.text}</p>
+                          <div className={styles.questionHeader}>
+                            <p className={styles.questionText}>{q.text}</p>
+                            <button
+                              type="button"
+                              className={styles.aiHelpBtn}
+                              title="Ask AI for help with this question"
+                              onClick={() => setAiQuestionContext({ id: q.id, text: q.text })}
+                            >
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/>
+                                <line x1="9" y1="22" x2="15" y2="22"/>
+                              </svg>
+                            </button>
+                          </div>
                           {q.type === 'single_choice' || q.type === 'multiple_choice' ? (
                             <ul className={styles.choiceList}>
                               {q.choices.map((ch) => {
@@ -441,7 +458,19 @@ export default function UnitPage() {
               )}
             </>
           )}
+          </div>
         </section>
+
+        <div className={styles.chatColumn}>
+          {unit && (
+            <AIChatPanel
+              key={unit.id}
+              unitId={unit.id}
+              questionContext={aiQuestionContext}
+              onClearQuestion={() => setAiQuestionContext(null)}
+            />
+          )}
+        </div>
       </main>
     </div>
   )

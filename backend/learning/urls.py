@@ -32,5 +32,7 @@ urlpatterns = [
     path("answers/submit/", views.SubmitAnswerView.as_view(), name="answer-submit"),
     path("attempts/finish/", views.FinishAttemptView.as_view(), name="attempt-finish"),
     path("plans/<int:plan_id>/progress/", views.PlanProgressView.as_view(), name="plan-progress"),
+    path("ai/chat/", views.AiChatView.as_view(), name="ai-chat"),
+    path("ai/landing-chat/", views.LandingChatView.as_view(), name="ai-landing-chat"),
 ]
 

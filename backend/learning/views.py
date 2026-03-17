@@ -23,6 +23,7 @@ from .models import (
     UnitProgress,
     SectionProgress,
     QuestionStats,
+    AiChatMessage,
 )
 from .serializers import (
     PlanListSerializer,
@@ -669,4 +670,185 @@ class PlanDocumentUploadView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class AiChatView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        unit_id = request.data.get("unit_id")
+        question_id = request.data.get("question_id")
+        message = (request.data.get("message") or "").strip()
+        history = request.data.get("history") or []
+
+        if not unit_id or not message:
+            return Response(
+                {"detail": "unit_id and message are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        unit = get_object_or_404(
+            Unit.objects.select_related("section__plan"),
+            id=unit_id,
+        )
+        plan = unit.section.plan
+        is_owner = plan.owner == request.user
+        is_enrolled = Enrollment.objects.filter(
+            plan=plan, user=request.user
+        ).exists()
+        if not is_owner and not is_enrolled:
+            return Response(
+                {"detail": "Access denied."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        question_context = ""
+        if question_id:
+            question = Question.objects.filter(
+                id=question_id, unit=unit
+            ).first()
+            if question:
+                question_context = (
+                    f"\n\nSTUDENT IS ASKING ABOUT THIS QUESTION:\n"
+                    f"Question text: {question.text}\n"
+                    f"Question type: {question.type}\n"
+                )
+                if question.type in {
+                    Question.QuestionType.SINGLE_CHOICE,
+                    Question.QuestionType.MULTIPLE_CHOICE,
+                }:
+                    choices = question.choices.all().order_by("order")
+                    choices_text = "\n".join(
+                        f"  - {c.text}" for c in choices
+                    )
+                    question_context += f"Answer options:\n{choices_text}\n"
+
+        system_prompt = (
+            "You are a friendly and patient tutor helping a student who is learning. "
+            "You have the unit theory as context. "
+            "Your goal is to help the student understand the material, NOT to give direct answers. "
+            "Instead:\n"
+            "- Explain concepts in simpler terms if the student is confused.\n"
+            "- Give hints and guide them toward the correct answer step by step.\n"
+            "- If the student asks for help with a specific question, "
+            "explain the relevant theory and give a gentle hint, "
+            "but do NOT reveal the exact answer unless explicitly asked.\n"
+            "- You can use your own knowledge to provide simpler analogies or examples "
+            "beyond the provided theory if it helps the student understand.\n"
+            "- Be concise but thorough. Use markdown formatting.\n\n"
+            f"UNIT THEORY:\n{unit.theory}\n"
+            f"{question_context}"
+        )
+
+        messages = [{"role": "system", "content": system_prompt}]
+        for h in history[-20:]:
+            role = h.get("role", "user")
+            content = h.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": message})
+
+        try:
+            llm = LLMClient()
+            resp = llm._client.chat.completions.create(
+                model=llm.model_name,
+                messages=messages,
+                temperature=0.5,
+                max_tokens=1024,
+            )
+            reply = resp.choices[0].message.content or ""
+        except Exception as exc:
+            return Response(
+                {"detail": f"AI error: {str(exc)}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        AiChatMessage.objects.create(
+            user=request.user,
+            plan=unit.section.plan,
+            unit=unit,
+            question_id=question_id,
+            role=AiChatMessage.Role.USER,
+            content=message,
+        )
+        AiChatMessage.objects.create(
+            user=request.user,
+            plan=unit.section.plan,
+            unit=unit,
+            question_id=question_id,
+            role=AiChatMessage.Role.ASSISTANT,
+            content=reply,
+        )
+
+        return Response(
+            {"reply": reply},
+            status=status.HTTP_200_OK,
+        )
+
+
+LANDING_SYSTEM_PROMPT = (
+    "You are the AI assistant for Smart Knowledge Hub — an educational platform.\n\n"
+    "HOW THE PLATFORM WORKS:\n"
+    "1. UPLOAD — The user uploads a study document (PDF, DOCX, TXT) on the main page or the Materials page.\n"
+    "2. MATERIALS — All uploaded documents appear on the 'Materials' page. The user can manage them there.\n"
+    "3. CREATE A PLAN — The user goes to 'Plans' → 'Create Plan', gives it a title, description, "
+    "and learning goals, then attaches one or more documents from their library.\n"
+    "4. GENERATE — The system uses AI + RAG to analyze the documents and automatically generates "
+    "a structured course: Sections → Units → Theory + Questions (single choice, multiple choice, open text, code).\n"
+    "5. STUDY — The user opens a plan, navigates units in the left sidebar, reads the theory, and answers questions.\n"
+    "6. SUBMIT — At the bottom of each unit there is a 'Submit answers' button. "
+    "After submitting, the user sees their score and whether they passed.\n"
+    "7. RETRY — If the user didn't pass, they can click 'Retry unit' to try again.\n"
+    "8. PROGRESS — Progress bars in the sidebar show plan-level and unit-level completion. "
+    "Only correctly answered questions count toward progress.\n"
+    "9. AI TUTOR — On each unit page there is an AI chat panel on the right side. "
+    "The user can ask questions about the theory or click the lightbulb icon next to any question "
+    "to get targeted AI help (hints, not direct answers).\n\n"
+    "GENERAL RULES:\n"
+    "- Be friendly, concise, and helpful.\n"
+    "- Answer questions about how to use the platform.\n"
+    "- If the user asks something unrelated to the platform, politely redirect them.\n"
+    "- Use markdown formatting for clarity.\n"
+    "- Answer in the same language the user writes in."
+)
+
+
+class LandingChatView(APIView):
+    authentication_classes = ()
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        message = (request.data.get("message") or "").strip()
+        history = request.data.get("history") or []
+
+        if not message:
+            return Response(
+                {"detail": "message is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        messages = [{"role": "system", "content": LANDING_SYSTEM_PROMPT}]
+        for h in history[-20:]:
+            role = h.get("role", "user")
+            content = h.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": message})
+
+        try:
+            llm = LLMClient()
+            resp = llm._client.chat.completions.create(
+                model=llm.model_name,
+                messages=messages,
+                temperature=0.5,
+                max_tokens=1024,
+            )
+            reply = resp.choices[0].message.content or ""
+        except Exception as exc:
+            return Response(
+                {"detail": f"AI error: {str(exc)}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({"reply": reply}, status=status.HTTP_200_OK)
 

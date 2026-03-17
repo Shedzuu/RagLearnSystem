@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import FileUpload from '../components/FileUpload'
 import BlockRow from '../components/BlockRow'
 import ReviewsSlider from '../components/ReviewsSlider'
-import AIChatPanel from '../components/AIChatPanel'
+import LandingChatPanel from '../components/LandingChatPanel'
 import { useAuth } from '../context/AuthContext'
 import { documentsApi } from '../api/client'
 import AppHeader from '../components/AppHeader'
@@ -110,7 +110,7 @@ export default function LandingPage() {
         <img src="/assets/logo_ai_chat.png" alt="" className={styles.chatBtnIcon} />
       </button>
 
-      <AIChatPanel isOpen={chatOpen} onClose={() => setChatOpen(false)} />
+      <LandingChatPanel isOpen={chatOpen} onClose={() => setChatOpen(false)} />
       {uploading && <UploadingOverlay />}
     </div>
   )
