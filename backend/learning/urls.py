@@ -27,8 +27,10 @@ urlpatterns = [
     path("documents/", DocumentListView.as_view(), name="document-list"),
     path("documents/upload/", FreeDocumentUploadView.as_view(), name="document-upload"),
     path("units/<int:pk>/", views.UnitDetailView.as_view(), name="unit-detail"),
+    path("units/<int:unit_id>/state/", views.UnitStateView.as_view(), name="unit-state"),
     path("attempts/start/", views.StartAttemptView.as_view(), name="attempt-start"),
     path("answers/submit/", views.SubmitAnswerView.as_view(), name="answer-submit"),
     path("attempts/finish/", views.FinishAttemptView.as_view(), name="attempt-finish"),
+    path("plans/<int:plan_id>/progress/", views.PlanProgressView.as_view(), name="plan-progress"),
 ]
 

@@ -25,7 +25,7 @@ async function request(path, options = {}) {
     ...options.headers,
   }
   const access = getStoredAccess()
-  if (access) headers['Authorization'] = `Bearer ${access}`
+  if (access && options.skipAuth !== true) headers['Authorization'] = `Bearer ${access}`
 
   const res = await fetch(url, { ...options, headers })
   if (!res.ok) {
@@ -47,6 +47,7 @@ export const authApi = {
     const data = await request('/auth/token/', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+      skipAuth: true,
     })
     setTokens(data.access, data.refresh)
     return data
@@ -62,6 +63,7 @@ export const authApi = {
         first_name: first_name || '',
         last_name: last_name || '',
       }),
+      skipAuth: true,
     })
   },
 
@@ -113,6 +115,10 @@ export const plansApi = {
     return request(`/units/${id}/`)
   },
 
+  async getUnitState(unitId) {
+    return request(`/units/${unitId}/state/`)
+  },
+
   async startAttempt(planId) {
     return request('/attempts/start/', {
       method: 'POST',
@@ -136,6 +142,10 @@ export const plansApi = {
         unit_id: unitId,
       }),
     })
+  },
+
+  async getPlanProgress(planId) {
+    return request(`/plans/${planId}/progress/`)
   },
 
   async uploadDocument(planId, file) {

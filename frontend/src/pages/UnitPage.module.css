@@ -20,9 +20,61 @@
 }
 
 .sidebarTitle {
-  margin: 0 0 1rem;
+  margin: 0 0 0.75rem;
   font-size: 1.1rem;
   font-weight: 700;
+}
+
+.sidebarProgress {
+  margin-bottom: 1rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--header-border);
+}
+
+.sidebarProgressRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.sidebarProgressLabel {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sidebarProgressValue {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sidebarProgressTrack {
+  width: 100%;
+  height: 6px;
+  background: var(--header-border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 0.6rem;
+}
+
+.sidebarProgressTrack:last-of-type {
+  margin-bottom: 0;
+}
+
+.sidebarProgressFillPlan {
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  border-radius: 999px;
+}
+
+.sidebarProgressFillUnit {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  border-radius: 999px;
 }
 
 .sectionList {
@@ -70,6 +122,23 @@
   font-size: 0.9rem;
 }
 
+.unitLinkRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.unitDoneBadge {
+  font-size: 0.72rem;
+  line-height: 1;
+  color: #14532d;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: 999px;
+  padding: 0.2rem 0.45rem;
+}
+
 .content {
   padding: 2.5rem 2rem;
   overflow-y: auto;
@@ -80,6 +149,7 @@
   font-size: 1.6rem;
   font-weight: 700;
 }
+
 
 .sectionTitle {
   margin: 1.5rem 0 0.75rem;

@@ -6,7 +6,8 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+# Для JWT (HMAC-SHA256) нужен ключ минимум 32 байта; иначе InsecureKeyLengthWarning.
+SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-at-least-32-bytes-long-change-in-prod')
 DEBUG = os.getenv('DEBUG', '1') == '1'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,backend').split(',')
 

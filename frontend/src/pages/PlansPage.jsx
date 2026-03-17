@@ -24,7 +24,27 @@ export default function PlansPage() {
       setError('')
       try {
         const data = await plansApi.listPlans()
-        if (!cancelled) setPlans(data)
+        const withProgress = await Promise.all(
+          data.map(async (plan) => {
+            try {
+              const progress = await plansApi.getPlanProgress(plan.id)
+              return {
+                ...plan,
+                progressPercent: Math.round(progress.plan_progress_percent || 0),
+                completedUnits: progress.completed_units || 0,
+                totalUnits: progress.total_units || 0,
+              }
+            } catch (_) {
+              return {
+                ...plan,
+                progressPercent: 0,
+                completedUnits: 0,
+                totalUnits: 0,
+              }
+            }
+          })
+        )
+        if (!cancelled) setPlans(withProgress)
       } catch (e) {
         if (!cancelled) setError('Failed to load plans')
       } finally {
@@ -63,6 +83,20 @@ export default function PlansPage() {
                   <p className={styles.planMeta}>
                     Status: <strong>{plan.generation_status}</strong>
                   </p>
+                  <div className={styles.progressWrap}>
+                    <div className={styles.progressMeta}>
+                      <span>Progress</span>
+                      <span>
+                        {plan.completedUnits}/{plan.totalUnits} ({plan.progressPercent}%)
+                      </span>
+                    </div>
+                    <div className={styles.progressTrack}>
+                      <div
+                        className={styles.progressFill}
+                        style={{ width: `${plan.progressPercent}%` }}
+                      />
+                    </div>
+                  </div>
                 </li>
               ))}
             </ul>

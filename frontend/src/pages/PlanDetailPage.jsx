@@ -10,6 +10,7 @@ export default function PlanDetailPage() {
   const navigate = useNavigate()
   const { user, loading } = useAuth()
   const [plan, setPlan] = useState(null)
+  const [planProgress, setPlanProgress] = useState(null)
   const [error, setError] = useState('')
   const [loadingPlan, setLoadingPlan] = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -26,8 +27,14 @@ export default function PlanDetailPage() {
       setLoadingPlan(true)
       setError('')
       try {
-        const data = await plansApi.getPlan(id)
-        if (!cancelled) setPlan(data)
+        const [data, progress] = await Promise.all([
+          plansApi.getPlan(id),
+          plansApi.getPlanProgress(id).catch(() => null),
+        ])
+        if (!cancelled) {
+          setPlan(data)
+          setPlanProgress(progress)
+        }
       } catch (e) {
         if (!cancelled) setError('Failed to load plan')
       } finally {
@@ -66,6 +73,25 @@ export default function PlanDetailPage() {
       <main className={styles.main}>
         <div className={styles.sidebar}>
           <h2 className={styles.sidebarTitle}>{plan ? plan.title : 'Plan'}</h2>
+          {planProgress && planProgress.total_units > 0 && (
+            <div className={styles.sidebarProgress}>
+              <div className={styles.sidebarProgressRow}>
+                <span className={styles.sidebarProgressLabel}>Plan progress</span>
+                <span className={styles.sidebarProgressValue}>
+                  {planProgress.completed_units}/{planProgress.total_units} ·{' '}
+                  {Math.round(planProgress.plan_progress_percent || 0)}%
+                </span>
+              </div>
+              <div className={styles.sidebarProgressTrack}>
+                <div
+                  className={styles.sidebarProgressFill}
+                  style={{
+                    width: `${Math.round(planProgress.plan_progress_percent || 0)}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
           {loadingPlan ? (
             <p className={styles.muted}>Loading sections...</p>
           ) : error ? (

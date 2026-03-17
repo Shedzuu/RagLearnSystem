@@ -7,6 +7,11 @@ from .models import User
 from .serializers import RegisterSerializer, UserSerializer
 
 
+class NoAuthMixin:
+    """Отключаем JWT для публичных эндпоинтов — иначе невалидный токен даёт 401 до проверки прав."""
+    authentication_classes = ()
+
+
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Accept 'email' in request body; map to username for auth (USERNAME_FIELD=email)."""
 
@@ -29,11 +34,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return super().validate(attrs)
 
 
-class CustomTokenObtainPairView(TokenObtainPairView):
+class CustomTokenObtainPairView(NoAuthMixin, TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
 
-class RegisterView(generics.CreateAPIView):
+class RegisterView(NoAuthMixin, generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (AllowAny,)
     serializer_class = RegisterSerializer

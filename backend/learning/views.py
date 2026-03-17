@@ -69,6 +69,243 @@ class UnitDetailView(generics.RetrieveAPIView):
         )
 
 
+class UnitStateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, unit_id, *args, **kwargs):
+        unit = get_object_or_404(
+            Unit.objects.select_related("section__plan").prefetch_related("questions"),
+            id=unit_id,
+            section__plan__owner=request.user,
+        )
+
+        enrollment = Enrollment.objects.filter(
+            user=request.user, plan=unit.section.plan
+        ).first()
+        if not enrollment:
+            return Response(
+                {
+                    "unit_id": unit.id,
+                    "section_id": unit.section_id,
+                    "plan_id": unit.section.plan_id,
+                    "attempt_id": None,
+                    "has_finished": False,
+                    "result": None,
+                    "answers": [],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # Приоритет: последняя попытка, у которой ЕСТЬ ответы по этому юниту
+        # (неважно, active или finished). Если таких нет — любая active.
+        latest_with_answers = (
+            Attempt.objects.filter(
+                enrollment=enrollment,
+                answers__question__unit=unit,
+            )
+            .distinct()
+            .order_by("-started_at")
+            .first()
+        )
+        if not latest_with_answers:
+            latest_with_answers = (
+                Attempt.objects.filter(
+                    enrollment=enrollment, finished_at__isnull=True
+                )
+                .order_by("-started_at")
+                .first()
+            )
+        selected_attempt = latest_with_answers
+
+        if not selected_attempt:
+            return Response(
+                {
+                    "unit_id": unit.id,
+                    "section_id": unit.section_id,
+                    "plan_id": unit.section.plan_id,
+                    "attempt_id": None,
+                    "has_finished": False,
+                    "result": None,
+                    "answers": [],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        answers_qs = (
+            Answer.objects.filter(attempt=selected_attempt, question__unit=unit)
+            .select_related("question")
+            .prefetch_related("selected_choices")
+        )
+
+        answers_payload = []
+        for answer in answers_qs:
+            answers_payload.append(
+                {
+                    "question_id": answer.question_id,
+                    "text_answer": answer.text_answer or "",
+                    "code_answer": answer.code_answer or "",
+                    "selected_choice_ids": list(
+                        answer.selected_choices.values_list("choice_id", flat=True)
+                    ),
+                    "last_result": {
+                        "is_correct": answer.is_correct,
+                        "earned_points": answer.earned_points,
+                        "feedback_text": answer.feedback_text or "",
+                    },
+                }
+            )
+
+        has_finished = selected_attempt.finished_at is not None
+        result_payload = None
+        if has_finished and answers_qs.exists():
+            max_points = float(
+                Question.objects.filter(
+                    id__in=answers_qs.values_list("question_id", flat=True)
+                ).aggregate(total=Sum("points"))["total"]
+                or 0.0
+            )
+            earned_points = float(
+                answers_qs.aggregate(total=Sum("earned_points"))["total"] or 0.0
+            )
+            correct_count = answers_qs.filter(is_correct=True).count()
+            total_questions = answers_qs.count()
+            score_percent = (earned_points / max_points * 100.0) if max_points > 0 else 0.0
+            result_payload = {
+                "score_percent": score_percent,
+                "correct_count": correct_count,
+                "total_questions": total_questions,
+                "earned_points": earned_points,
+                "max_points": max_points,
+            }
+
+        return Response(
+            {
+                "unit_id": unit.id,
+                "section_id": unit.section_id,
+                "plan_id": unit.section.plan_id,
+                "attempt_id": selected_attempt.id,
+                "has_finished": has_finished,
+                "result": result_payload,
+                "answers": answers_payload,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class PlanProgressView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, plan_id, *args, **kwargs):
+        plan = get_object_or_404(Plan, id=plan_id, owner=request.user)
+        enrollment = Enrollment.objects.filter(user=request.user, plan=plan).first()
+
+        sections = plan.sections.prefetch_related("units").all()
+        units = [u for section in sections for u in section.units.all()]
+        total_units = len(units)
+
+        if not enrollment or total_units == 0:
+            return Response(
+                {
+                    "plan_id": plan.id,
+                    "plan_progress_percent": 0.0,
+                    "completed_units": 0,
+                    "total_units": total_units,
+                    "sections": [
+                        {
+                            "section_id": section.id,
+                            "title": section.title,
+                            "progress_percent": 0.0,
+                            "completed": False,
+                            "units": [
+                                {
+                                    "unit_id": unit.id,
+                                    "title": unit.title,
+                                    "progress_percent": 0.0,
+                                    "completed": False,
+                                }
+                                for unit in section.units.all()
+                            ],
+                        }
+                        for section in sections
+                    ],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        unit_progress_map = {
+            up.unit_id: up
+            for up in UnitProgress.objects.filter(enrollment=enrollment, unit__in=units)
+        }
+        section_progress_map = {
+            sp.section_id: sp
+            for sp in SectionProgress.objects.filter(
+                enrollment=enrollment, section__in=sections
+            )
+        }
+
+        completed_units = 0
+        units_progress_sum = 0.0
+        sections_payload = []
+
+        for section in sections:
+            section_units_payload = []
+            section_units = list(section.units.all())
+            section_completed_units = 0
+            section_progress_sum = 0.0
+
+            for unit in section_units:
+                up = unit_progress_map.get(unit.id)
+                progress_percent = float(up.progress_percent) if up else 0.0
+                completed = bool(up.completed) if up else False
+                if completed:
+                    completed_units += 1
+                    section_completed_units += 1
+                units_progress_sum += progress_percent
+                section_progress_sum += progress_percent
+                section_units_payload.append(
+                    {
+                        "unit_id": unit.id,
+                        "title": unit.title,
+                        "progress_percent": progress_percent,
+                        "completed": completed,
+                    }
+                )
+
+            sp = section_progress_map.get(section.id)
+            if sp:
+                section_progress_percent = float(sp.progress_percent)
+                section_completed = bool(sp.completed)
+            else:
+                section_progress_percent = (
+                    section_progress_sum / len(section_units) if section_units else 0.0
+                )
+                section_completed = (
+                    section_completed_units == len(section_units) and len(section_units) > 0
+                )
+
+            sections_payload.append(
+                {
+                    "section_id": section.id,
+                    "title": section.title,
+                    "progress_percent": section_progress_percent,
+                    "completed": section_completed,
+                    "units": section_units_payload,
+                }
+            )
+
+        plan_progress_percent = units_progress_sum / total_units if total_units else 0.0
+        return Response(
+            {
+                "plan_id": plan.id,
+                "plan_progress_percent": plan_progress_percent,
+                "completed_units": completed_units,
+                "total_units": total_units,
+                "sections": sections_payload,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class StartAttemptView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -308,16 +545,17 @@ class FinishAttemptView(APIView):
             if total_q_in_unit == 0:
                 progress_percent = 0.0
             else:
-                answered_count = (
+                correct_count_in_unit = (
                     Answer.objects.filter(
                         attempt__enrollment=enrollment,
                         question__unit=unit,
+                        is_correct=True,
                     )
                     .values("question_id")
                     .distinct()
                     .count()
                 )
-                progress_percent = (answered_count / total_q_in_unit) * 100.0
+                progress_percent = (correct_count_in_unit / total_q_in_unit) * 100.0
 
             unit_progress_obj, _ = UnitProgress.objects.get_or_create(
                 enrollment=enrollment,

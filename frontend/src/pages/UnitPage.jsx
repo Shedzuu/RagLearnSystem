@@ -5,38 +5,13 @@ import { useAuth } from '../context/AuthContext'
 import { plansApi } from '../api/client'
 import styles from './UnitPage.module.css'
 
-function getUnitStateKey(planId, unitId) {
-  return `diploma_unit_state_${planId}_${unitId}`
-}
-
-function readUnitState(planId, unitId) {
-  if (!planId || !unitId) return null
-  try {
-    const raw = localStorage.getItem(getUnitStateKey(planId, unitId))
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (parsed && typeof parsed === 'object') return parsed
-    return null
-  } catch (_) {
-    return null
-  }
-}
-
-function writeUnitState(planId, unitId, state) {
-  if (!planId || !unitId) return
-  try {
-    localStorage.setItem(getUnitStateKey(planId, unitId), JSON.stringify(state))
-  } catch (_) {
-    // ignore quota/storage errors
-  }
-}
-
 export default function UnitPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user, loading } = useAuth()
   const [unit, setUnit] = useState(null)
   const [plan, setPlan] = useState(null)
+  const [planProgressState, setPlanProgressState] = useState(null)
   const [attemptId, setAttemptId] = useState(null)
   const [answersState, setAnswersState] = useState({})
   const [unitResult, setUnitResult] = useState(null)
@@ -55,33 +30,58 @@ export default function UnitPage() {
     let cancelled = false
     async function load() {
       setLoadingUnit(true)
+      setLoadingPlan(true)
       setError('')
       try {
         const data = await plansApi.getUnit(id)
         if (cancelled) return
         setUnit(data)
-        const cachedState = readUnitState(data.plan_id, data.id)
-        if (cachedState && cachedState.unitId === data.id) {
-          setAnswersState(cachedState.answersState || {})
-          setUnitResult(cachedState.unitResult || null)
-          setHasFinished(Boolean(cachedState.hasFinished))
-          setAttemptId(cachedState.attemptId || null)
-        } else {
-          setAnswersState({})
-          setUnitResult(null)
-          setHasFinished(false)
-          setAttemptId(null)
-        }
 
-        // Запрашиваем попытку только если секция ещё не завершена.
-        if (!cachedState?.hasFinished || !cachedState?.attemptId) {
+        const [fullPlan, unitState, progress] = await Promise.all([
+          plansApi.getPlan(data.plan_id),
+          plansApi.getUnitState(data.id),
+          plansApi.getPlanProgress(data.plan_id),
+        ])
+        if (cancelled) return
+        setPlan(fullPlan)
+        setPlanProgressState(progress)
+
+        const hydratedAnswers = {}
+        for (const ans of unitState.answers || []) {
+          hydratedAnswers[ans.question_id] = {
+            selectedChoices: ans.selected_choice_ids || [],
+            textAnswer: ans.text_answer || '',
+            codeAnswer: ans.code_answer || '',
+            lastResult: ans.last_result || null,
+          }
+        }
+        setAnswersState(hydratedAnswers)
+        setHasFinished(Boolean(unitState.has_finished))
+        setAttemptId(unitState.attempt_id || null)
+        setUnitResult(
+          unitState.result
+            ? {
+                unitId: data.id,
+                scorePercent: unitState.result.score_percent,
+                correctCount: unitState.result.correct_count,
+                totalQuestions: unitState.result.total_questions,
+                earnedPoints: unitState.result.earned_points,
+                maxPoints: unitState.result.max_points,
+              }
+            : null
+        )
+
+        if (!unitState.has_finished && !unitState.attempt_id) {
           const attempt = await plansApi.startAttempt(data.plan_id)
           if (!cancelled) setAttemptId(attempt.attempt_id)
         }
       } catch (e) {
         if (!cancelled) setError('Failed to load unit')
       } finally {
-        if (!cancelled) setLoadingUnit(false)
+        if (!cancelled) {
+          setLoadingUnit(false)
+          setLoadingPlan(false)
+        }
       }
     }
     load()
@@ -90,38 +90,34 @@ export default function UnitPage() {
     }
   }, [id, user])
 
-  // Load full plan structure for sidebar navigation once we know plan_id
-  useEffect(() => {
-    if (!user || !unit?.plan_id) return
-    let cancelled = false
-    async function loadPlan() {
-      setLoadingPlan(true)
-      try {
-        const fullPlan = await plansApi.getPlan(unit.plan_id)
-        if (!cancelled) setPlan(fullPlan)
-      } catch (_) {
-        // Навбар — вспомогательная часть, можно молча проигнорировать ошибку
-      } finally {
-        if (!cancelled) setLoadingPlan(false)
+  const correctQuestionsCount = unit
+    ? unit.questions.filter((q) => {
+        const qState = answersState[q.id] || {}
+        return qState.lastResult?.is_correct === true
+      }).length
+    : 0
+
+  const unitProgressPercent = unit?.questions?.length
+    ? Math.round((correctQuestionsCount / unit.questions.length) * 100)
+    : 0
+
+  const planProgress = (() => {
+    if (!planProgressState) {
+      return { completedUnits: 0, totalUnits: 0, percent: 0, completedSet: new Set() }
+    }
+    const completedSet = new Set()
+    for (const section of planProgressState.sections || []) {
+      for (const u of section.units || []) {
+        if (u.completed) completedSet.add(u.unit_id)
       }
     }
-    loadPlan()
-    return () => {
-      cancelled = true
+    return {
+      completedUnits: planProgressState.completed_units || 0,
+      totalUnits: planProgressState.total_units || 0,
+      percent: Math.round(planProgressState.plan_progress_percent || 0),
+      completedSet,
     }
-  }, [user, unit])
-
-  // Персистим состояние текущей секции, чтобы ответы и результат не исчезали.
-  useEffect(() => {
-    if (!unit) return
-    writeUnitState(unit.plan_id, unit.id, {
-      unitId: unit.id,
-      attemptId,
-      answersState,
-      unitResult,
-      hasFinished,
-    })
-  }, [unit, attemptId, answersState, unitResult, hasFinished])
+  })()
 
   const updateAnswerState = (questionId, update) => {
     setAnswersState((prev) => ({
@@ -185,6 +181,8 @@ export default function UnitPage() {
         unitId: unit.id,
         sectionId: unit.section_id,
       })
+      const progress = await plansApi.getPlanProgress(unit.plan_id)
+      setPlanProgressState(progress)
 
       setUnitResult({
         unitId: unit.id,
@@ -213,13 +211,8 @@ export default function UnitPage() {
       setAnswersState({})
       setUnitResult(null)
       setHasFinished(false)
-      writeUnitState(unit.plan_id, unit.id, {
-        unitId: unit.id,
-        attemptId: attempt.attempt_id,
-        answersState: {},
-        unitResult: null,
-        hasFinished: false,
-      })
+      const progress = await plansApi.getPlanProgress(unit.plan_id)
+      setPlanProgressState(progress)
     } catch (e) {
       setError('Failed to start a new attempt')
     } finally {
@@ -235,6 +228,38 @@ export default function UnitPage() {
       <main className={styles.main}>
         <aside className={styles.sidebar}>
           <h2 className={styles.sidebarTitle}>{plan ? plan.title : 'Plan'}</h2>
+          {plan && (
+            <div className={styles.sidebarProgress}>
+              <div className={styles.sidebarProgressRow}>
+                <span className={styles.sidebarProgressLabel}>Plan</span>
+                <span className={styles.sidebarProgressValue}>
+                  {planProgress.completedUnits}/{planProgress.totalUnits} · {planProgress.percent}%
+                </span>
+              </div>
+              <div className={styles.sidebarProgressTrack}>
+                <div
+                  className={styles.sidebarProgressFillPlan}
+                  style={{ width: `${planProgress.percent}%` }}
+                />
+              </div>
+              {unit?.questions?.length > 0 && (
+                <>
+                  <div className={styles.sidebarProgressRow}>
+                    <span className={styles.sidebarProgressLabel}>This unit</span>
+                    <span className={styles.sidebarProgressValue}>
+                      {correctQuestionsCount}/{unit.questions.length} · {unitProgressPercent}%
+                    </span>
+                  </div>
+                  <div className={styles.sidebarProgressTrack}>
+                    <div
+                      className={styles.sidebarProgressFillUnit}
+                      style={{ width: `${unitProgressPercent}%` }}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {loadingPlan || !plan ? (
             <p className={styles.muted}>Loading navigation...</p>
           ) : !plan.sections.length ? (
@@ -248,14 +273,19 @@ export default function UnitPage() {
                     <ul className={styles.unitList}>
                       {section.units.map((u) => (
                         <li key={u.id}>
-                          <Link
-                            className={
-                              u.id.toString() === id ? styles.unitLinkActive : styles.unitLink
-                            }
-                            to={`/units/${u.id}`}
-                          >
-                            {u.title}
-                          </Link>
+                          <div className={styles.unitLinkRow}>
+                            <Link
+                              className={
+                                u.id.toString() === id ? styles.unitLinkActive : styles.unitLink
+                              }
+                              to={`/units/${u.id}`}
+                            >
+                              {u.title}
+                            </Link>
+                            {planProgress.completedSet.has(u.id) && (
+                              <span className={styles.unitDoneBadge}>Done</span>
+                            )}
+                          </div>
                         </li>
                       ))}
                     </ul>
