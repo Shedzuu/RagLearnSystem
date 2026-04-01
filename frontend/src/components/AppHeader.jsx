@@ -77,7 +77,7 @@ export default function AppHeader() {
                   setProfileOpen(false)
                 }}
               >
-                Планы
+                Plans
               </button>
               <p role="button" tabIndex={0} className={styles.logoutText} onClick={() => { logout(); setProfileOpen(false); }} onKeyDown={(e) => e.key === 'Enter' && (logout(), setProfileOpen(false))}>
                 Log out
