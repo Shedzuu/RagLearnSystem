@@ -8,7 +8,7 @@ import numpy as np
 from django.conf import settings
 from sentence_transformers import SentenceTransformer  # type: ignore
 
-from .models import Plan, Document, Chunk
+from .models import Plan, Document, Chunk, DocumentChunk
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +184,58 @@ def index_plan_documents(plan: Plan) -> None:
     logger.info("[RAG] Indexing complete: %s chunks stored for plan id=%s", len(objs), plan.id)
 
 
+def index_documents(docs: List[Document]) -> int:
+    """
+    Build or rebuild text chunks and embeddings for user-uploaded documents (no Plan required).
+    Returns the number of chunks stored.
+    """
+    docs = list(docs)
+    if not docs:
+        return 0
+
+    embedder = EmbeddingService()
+    total_stored = 0
+
+    for doc in docs:
+        logger.info("[RAG] Indexing document id=%s (%s) ...", doc.id, doc.original_name)
+        DocumentChunk.objects.filter(document=doc).delete()
+
+        try:
+            text = _load_document_text(doc)
+        except Exception as e:
+            logger.warning("[RAG] Skip document id=%s %s: %s", doc.id, doc.original_name, e)
+            continue
+        if not text:
+            continue
+
+        all_chunks = split_text_with_overlap(text, page_number=None)
+        if not all_chunks:
+            continue
+
+        contents = [c["content"] for c in all_chunks]
+        embeddings = embedder.embed_texts(contents, is_query=False)
+
+        objs: List[DocumentChunk] = []
+        for ch, emb in zip(all_chunks, embeddings):
+            objs.append(
+                DocumentChunk(
+                    document=doc,
+                    content=ch["content"],
+                    page_number=ch["page_number"],
+                    chunk_index=ch["chunk_index"],
+                    start_char=ch["start_char"],
+                    end_char=ch["end_char"],
+                    embedding=emb,
+                )
+            )
+
+        DocumentChunk.objects.bulk_create(objs, batch_size=200)
+        total_stored += len(objs)
+        logger.info("[RAG] Document id=%s indexed: %s chunks", doc.id, len(objs))
+
+    return total_stored
+
+
 from pgvector.django import CosineDistance  # noqa E402
 
 
@@ -276,6 +328,121 @@ class RAGService:
             total_len += len(text)
 
         return "\n\n---\n\n".join(parts)
+
+
+class DocumentRAGService:
+    """
+    Retrieve relevant chunks for a set of Documents (pre-plan stage).
+    """
+
+    def __init__(self) -> None:
+        self.embedder = EmbeddingService()
+
+    def search_similar_doc_chunks(
+        self, documents: List[Document], query: str, top_k: int = 25
+    ) -> List[DocumentChunk]:
+        if not documents:
+            return []
+        q_vec = self.embedder.embed_texts([query], is_query=True)[0]
+        return (
+            DocumentChunk.objects.filter(document__in=documents, embedding__isnull=False)
+            .order_by(CosineDistance("embedding", q_vec))[:top_k]
+        )
+
+    def build_context(
+        self,
+        documents: List[Document],
+        query: str,
+        top_k: int = 25,
+        max_total_chars: int = 16000,
+    ) -> str:
+        chunks = self.search_similar_doc_chunks(documents, query=query, top_k=top_k)
+        parts: List[str] = []
+        total_len = 0
+        for ch in chunks:
+            block = f"[doc: {ch.document.original_name}]\n{ch.content}"
+            if total_len + len(block) > max_total_chars:
+                break
+            parts.append(block)
+            total_len += len(block)
+        return "\n\n---\n\n".join(parts)
+
+    def build_context_for_topics(
+        self,
+        documents: List[Document],
+        topics: List[str],
+        top_k_per_topic: int = 20,
+        max_total_chars: int = 16000,
+    ) -> str:
+        """
+        Build a textual context for LLM by selecting top chunks per topic,
+        but using doc-level chunks (DocumentChunk) instead of plan-level Chunk.
+        """
+        chunks_by_id: Dict[int, str] = {}
+        order: List[int] = []
+        topic_chunk_counts: Dict[str, int] = {}
+
+        if not documents:
+            raise InsufficientCoverageError("No documents provided for document-level RAG.")
+
+        if not topics:
+            # Fallback: take first N chunks by chunk_index for each doc (deterministic order)
+            qs = (
+                DocumentChunk.objects.filter(document__in=documents, embedding__isnull=False)
+                .order_by("document_id", "chunk_index", "id")[:top_k_per_topic]
+            )
+            for ch in qs:
+                chunks_by_id[ch.id] = self._format_doc_chunk(ch)
+                order.append(ch.id)
+        else:
+            for topic in topics:
+                count_for_topic = 0
+                for ch in self.search_similar_doc_chunks(documents, query=topic, top_k=top_k_per_topic):
+                    if ch.id not in chunks_by_id:
+                        chunks_by_id[ch.id] = self._format_doc_chunk(ch, topic=topic)
+                        order.append(ch.id)
+                        count_for_topic += 1
+                topic_chunk_counts[topic] = count_for_topic
+
+        if not order:
+            raise InsufficientCoverageError(
+                "В загруженных материалах не найдено ни одного релевантного фрагмента для указанных целей обучения."
+            )
+
+        # coverage check (keeps behavior similar to plan-level RAG)
+        if topics:
+            poor_topics = [
+                topic
+                for topic in topics
+                if topic_chunk_counts.get(topic, 0) < MIN_CHUNKS_PER_TOPIC
+            ]
+            if poor_topics:
+                raise InsufficientCoverageError(
+                    "По следующим целям в материалах очень мало или совсем нет информации: "
+                    + "; ".join(poor_topics)
+                )
+
+        parts: List[str] = []
+        total_len = 0
+        for cid in order:
+            text = chunks_by_id[cid]
+            if total_len + len(text) > max_total_chars:
+                break
+            parts.append(text)
+            total_len += len(text)
+
+        return "\n\n---\n\n".join(parts)
+
+    @staticmethod
+    def _format_doc_chunk(chunk: DocumentChunk, topic: str | None = None) -> str:
+        header_parts = []
+        if topic:
+            header_parts.append(f"[topic: {topic}]")
+        header_parts.append(f"[doc: {chunk.document.original_name}]")
+        if chunk.page_number is not None:
+            header_parts.append(f"[page: {chunk.page_number}]")
+        header = " ".join(header_parts)
+        return f"{header}\n{chunk.content}"
 
     @staticmethod
     def _format_chunk(chunk: Chunk, topic: str | None) -> str:

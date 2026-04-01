@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { plansApi } from '../api/client'
 import AppHeader from '../components/AppHeader'
+import PreplanChatPanel from '../components/PreplanChatPanel'
 import styles from './CreatePlanPage.module.css'
 
 export default function CreatePlanPage() {
@@ -13,6 +14,7 @@ export default function CreatePlanPage() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [goals, setGoals] = useState('')
+  const [preplanChatOpen, setPreplanChatOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -84,12 +86,31 @@ export default function CreatePlanPage() {
                 placeholder="E.g. learn loops, variables, conditionals and dictionaries from the selected materials."
               />
             </label>
+            {selectedDocumentIds.length > 0 && (
+              <button
+                type="button"
+                className={styles.aiBtn}
+                onClick={() => setPreplanChatOpen(true)}
+              >
+                Help me write goals with AI
+              </button>
+            )}
             <button type="submit" className={styles.btn} disabled={submitting}>
               {submitting ? 'Creating…' : 'Create plan'}
             </button>
           </form>
         </div>
       </main>
+
+      <PreplanChatPanel
+        isOpen={preplanChatOpen}
+        onClose={() => setPreplanChatOpen(false)}
+        documentIds={selectedDocumentIds}
+        onApplyGoals={(text) => {
+          setGoals(text)
+          setPreplanChatOpen(false)
+        }}
+      />
     </div>
   )
 }

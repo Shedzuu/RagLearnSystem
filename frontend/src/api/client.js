@@ -171,6 +171,17 @@ export const plansApi = {
     })
   },
 
+  async sendPreplanChat({ documentIds, message, history }) {
+    return request('/ai/preplan-chat/', {
+      method: 'POST',
+      body: JSON.stringify({
+        document_ids: documentIds || [],
+        message,
+        history: history || [],
+      }),
+    })
+  },
+
   async uploadDocument(planId, file) {
     const formData = new FormData()
     formData.append('file', file)

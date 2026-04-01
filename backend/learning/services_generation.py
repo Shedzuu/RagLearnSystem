@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 from django.conf import settings
 
 from .models import Plan, Section, Unit, Question, Choice
-from .services_rag import index_plan_documents, RAGService
+from .services_rag import DocumentRAGService, index_documents
 
 logger = logging.getLogger(__name__)
 
@@ -152,20 +152,55 @@ def generate_plan_from_documents(plan: Plan) -> None:
     """
     llm = LLMClient()
 
-    logger.info("[generate] Step 1/4: Indexing plan documents (chunks + embeddings)...")
-    index_plan_documents(plan)
-
-    logger.info("[generate] Step 2/4: Normalizing goals -> topics...")
+    logger.info("[generate] Step 1/4: Normalizing goals -> topics...")
     topics = _normalize_goals_with_llm(plan, llm)
 
-    logger.info("[generate] Step 3/4: Building RAG context from chunks...")
-    rag = RAGService()
-    context = rag.build_context_for_topics(plan, topics)
+    logger.info("[generate] Step 2/4: Building doc-level RAG context from chunks...")
+    rag = DocumentRAGService()
+    documents = list(plan.documents.all())
+
+    # Ensure doc-level chunks exist. Re-index only documents that are missing.
+    try:
+        missing = [d for d in documents if not d.doc_chunks.exists()]
+        if missing:
+            logger.info(
+                "[generate] Doc-level indexing missing for %s doc(s); indexing now...",
+                len(missing),
+            )
+            index_documents(missing)
+    except Exception:
+        # If indexing check fails, we'll still try to build context; it may raise.
+        pass
+
+    try:
+        context = rag.build_context_for_topics(documents, topics)
+    except Exception:
+        # Fallback until doc-level migrations/indexing are fully available.
+        parts = []
+        total = 0
+        per_doc_cap = 6000
+        max_total_chars = 16000
+        from .services_rag import _load_document_text
+
+        for doc in documents:
+            try:
+                text = _load_document_text(doc) or ""
+            except Exception:
+                text = ""
+            if not text:
+                continue
+            snippet = text[:per_doc_cap]
+            block = f"[doc: {doc.original_name}]\n{snippet}"
+            if total + len(block) > max_total_chars:
+                break
+            parts.append(block)
+            total += len(block)
+        context = "\n\n---\n\n".join(parts)
     if not context:
         raise RuntimeError("No context could be built from plan documents")
     logger.info("[generate] RAG context length: %s chars", len(context))
 
-    logger.info("[generate] Step 4/4: Generating course structure with LLM...")
+    logger.info("[generate] Step 3/4: Generating course structure with LLM...")
     structure = _generate_course_structure_with_llm(plan, context, topics, llm)
 
     sections_data: List[Dict[str, Any]] = structure.get("sections") or []

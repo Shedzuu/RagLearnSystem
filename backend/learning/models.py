@@ -341,3 +341,29 @@ class Chunk(models.Model):
     def __str__(self) -> str:
         return f"Chunk {self.chunk_index} for {self.document_id}"
 
+
+class DocumentChunk(models.Model):
+    """
+    Text chunk from a user-uploaded document with vector embedding.
+    Used for pre-plan analysis (before a Plan exists).
+    """
+
+    document = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="doc_chunks"
+    )
+    content = models.TextField()
+    page_number = models.IntegerField(null=True, blank=True)
+    chunk_index = models.IntegerField()
+    start_char = models.IntegerField(null=True, blank=True)
+    end_char = models.IntegerField(null=True, blank=True)
+    embedding = VectorField(dimensions=1024, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["document", "chunk_index"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"DocumentChunk {self.chunk_index} for {self.document_id}"
+

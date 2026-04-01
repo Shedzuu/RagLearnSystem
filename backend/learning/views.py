@@ -32,6 +32,7 @@ from .serializers import (
     AnswerCreateSerializer,
 )
 from .services_generation import LLMClient
+from .services_rag import DocumentRAGService, index_documents, _load_document_text
 
 
 class PlanListCreateView(generics.ListCreateAPIView):
@@ -851,4 +852,143 @@ class LandingChatView(APIView):
             )
 
         return Response({"reply": reply}, status=status.HTTP_200_OK)
+
+
+class PreplanChatView(APIView):
+    """
+    Pre-plan assistant chat:
+    takes selected document ids (owned by user), builds a short context,
+    and asks LLM to (1) list topics, (2) ask clarifying questions, (3) propose suggested goals.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        document_ids = request.data.get("document_ids") or []
+        message = (request.data.get("message") or "").strip()
+        history = request.data.get("history") or []
+
+        if not isinstance(document_ids, list) or not document_ids:
+            return Response(
+                {"detail": "document_ids (non-empty list) is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not message:
+            return Response(
+                {"detail": "message is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        docs = list(
+            Document.objects.filter(id__in=document_ids, owner=request.user).order_by("id")
+        )
+        if not docs:
+            return Response(
+                {"detail": "No accessible documents found for provided document_ids."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Ensure documents are indexed. If not indexed yet, index on-demand.
+        # (Upload-time indexing should cover most cases, but this is a safe fallback.)
+        try:
+            missing = [d for d in docs if not d.doc_chunks.exists()]
+            if missing:
+                index_documents(missing)
+        except Exception:
+            # If indexing fails, we'll still try to proceed (context may be empty).
+            pass
+
+        rag = DocumentRAGService()
+        try:
+            context = rag.build_context(docs, query=message, top_k=30, max_total_chars=16000)
+        except Exception:
+            # Fallback until migrations/embeddings are fully available.
+            # Keeps pre-plan flow working even if doc-level vector chunks are not ready.
+            parts = []
+            total = 0
+            per_doc_cap = 4000
+            max_total_chars = 16000
+            for doc in docs:
+                try:
+                    text = _load_document_text(doc) or ""
+                except Exception:
+                    text = ""
+                if not text:
+                    continue
+                snippet = text[:per_doc_cap]
+                block = f"[doc: {doc.original_name}]\n{snippet}"
+                if total + len(block) > max_total_chars:
+                    break
+                parts.append(block)
+                total += len(block)
+            context = "\n\n---\n\n".join(parts)
+        if not context:
+            return Response(
+                {"detail": "No indexed chunks available for selected documents."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        system_prompt = (
+            "You are an expert instructional designer and tutor.\n"
+            "You will receive excerpts from the user's selected study documents.\n"
+            "Your job is to help the user clarify what they want to learn and produce a high-quality 'learning goals' text.\n\n"
+            "Rules:\n"
+            "- First, list the main topics you can confidently identify from the materials.\n"
+            "- Then ask 3-7 clarifying questions to refine scope, level, and priorities.\n"
+            "- Then propose 'suggested_goals' as a concise paragraph (or bullet list) the user can paste into the plan form.\n"
+            "- If the user asks something outside the provided materials, say it and propose how to proceed.\n"
+            "- Reply in the same language as the user.\n\n"
+            "Return ONLY valid JSON with keys:\n"
+            "- reply: string (your full answer in markdown)\n"
+            "- suggested_goals: string (clean text the user can paste)\n"
+            "- topics: array of strings\n"
+            "- questions: array of strings\n\n"
+            f"Materials excerpts (retrieved):\n{context}\n"
+        )
+
+        # Convert chat history to OpenAI format
+        messages = [{"role": "system", "content": system_prompt}]
+        for h in history[-20:]:
+            role = h.get("role", "user")
+            content = h.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": message})
+
+        try:
+            llm = LLMClient()
+        except Exception as exc:
+            # LLM client not configured (missing key/package etc.)
+            return Response(
+                {"detail": f"AI is not configured: {str(exc)}"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            # Prefer JSON response format when supported
+            resp = llm._client.chat.completions.create(
+                model=llm.model_name,
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=1200,
+            )
+            content = resp.choices[0].message.content or "{}"
+            import json
+
+            data = json.loads(content)
+            return Response(
+                {
+                    "reply": data.get("reply") or "",
+                    "suggested_goals": data.get("suggested_goals") or "",
+                    "topics": data.get("topics") or [],
+                    "questions": data.get("questions") or [],
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as exc:
+            return Response(
+                {"detail": f"AI error: {str(exc)}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 

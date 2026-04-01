@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Document
+from .services_rag import index_documents
 
 
 class FreeDocumentUploadView(APIView):
@@ -45,6 +46,13 @@ class FreeDocumentUploadView(APIView):
                 "file_size": uploaded_file.size,
             },
         )
+
+        # Index document chunks + embeddings immediately for pre-plan AI chat.
+        try:
+            index_documents([doc])
+        except Exception:
+            # Indexing failures should not block upload; user can still attach docs to plan.
+            pass
 
         return Response(
             {

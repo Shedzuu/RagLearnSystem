@@ -95,3 +95,18 @@
 .btn:hover {
   background: #374151;
 }
+
+.aiBtn {
+  padding: 0.65rem 1.1rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #111827;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.aiBtn:hover {
+  background: #fde68a;
+}

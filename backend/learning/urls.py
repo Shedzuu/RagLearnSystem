@@ -34,5 +34,6 @@ urlpatterns = [
     path("plans/<int:plan_id>/progress/", views.PlanProgressView.as_view(), name="plan-progress"),
     path("ai/chat/", views.AiChatView.as_view(), name="ai-chat"),
     path("ai/landing-chat/", views.LandingChatView.as_view(), name="ai-landing-chat"),
+    path("ai/preplan-chat/", views.PreplanChatView.as_view(), name="ai-preplan-chat"),
 ]
 
