@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Set
 
 import numpy as np
 from django.conf import settings
@@ -366,6 +366,56 @@ class DocumentRAGService:
             parts.append(block)
             total_len += len(block)
         return "\n\n---\n\n".join(parts)
+
+    def build_context_multiquery(
+        self,
+        documents: List[Document],
+        queries: List[str],
+        *,
+        top_k_per_query: int = 14,
+        max_total_chars: int = 36000,
+        exclude_chunk_ids: Set[int] | None = None,
+        oversample_factor: int = 3,
+    ) -> Tuple[str, Set[int]]:
+        """
+        Several semantic searches (different phrasings) merged into one context.
+        Prefer chunks not in exclude_chunk_ids (e.g. already used for prior units)
+        so adjacent modules are less likely to repeat the same passage.
+        Returns (merged_context, chunk_ids_actually_included).
+        """
+        exclude_chunk_ids = exclude_chunk_ids or set()
+        if not documents:
+            return "", set()
+
+        ordered_unique: List[DocumentChunk] = []
+        seen_ids: Set[int] = set()
+        for q in queries:
+            q = (q or "").strip()
+            if not q:
+                continue
+            take = max(5, top_k_per_query * oversample_factor)
+            raw = self.search_similar_doc_chunks(documents, query=q, top_k=take)
+            for ch in raw:
+                if ch.id in seen_ids:
+                    continue
+                seen_ids.add(ch.id)
+                ordered_unique.append(ch)
+
+        fresh = [c for c in ordered_unique if c.id not in exclude_chunk_ids]
+        stale = [c for c in ordered_unique if c.id in exclude_chunk_ids]
+        final_order = fresh + stale
+
+        parts: List[str] = []
+        total_len = 0
+        used_ids: Set[int] = set()
+        for ch in final_order:
+            block = f"[doc: {ch.document.original_name}]\n{ch.content}"
+            if total_len + len(block) > max_total_chars:
+                break
+            parts.append(block)
+            total_len += len(block)
+            used_ids.add(ch.id)
+        return "\n\n---\n\n".join(parts), used_ids
 
     def build_context_for_topics(
         self,

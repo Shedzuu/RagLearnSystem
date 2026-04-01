@@ -4,14 +4,29 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import List, Dict, Any
-
-from django.conf import settings
+from typing import List, Dict, Any, Set
 
 from .models import Plan, Section, Unit, Question, Choice
 from .services_rag import DocumentRAGService, index_documents
 
 logger = logging.getLogger(__name__)
+
+# Outline step: broad RAG slice for structuring the course.
+_DEFAULT_GENERATION_CONTEXT_CHARS = int(os.getenv("LLM_GENERATION_CONTEXT_CHARS", "52000"))
+_DEFAULT_GENERATION_TOP_K_PER_TOPIC = int(os.getenv("LLM_GENERATION_TOP_K_PER_TOPIC", "28"))
+_DEFAULT_OUTLINE_MAX_TOKENS = int(os.getenv("LLM_OUTLINE_MAX_TOKENS", "6000"))
+# Per-unit step: focused context + large completion for theory + many questions.
+_DEFAULT_UNIT_CONTEXT_CHARS = int(os.getenv("LLM_UNIT_CONTEXT_CHARS", "36000"))
+_DEFAULT_UNIT_CONTEXT_TOP_K = int(os.getenv("LLM_UNIT_CONTEXT_TOP_K", "40"))
+_DEFAULT_UNIT_MAX_TOKENS = int(os.getenv("LLM_UNIT_MAX_TOKENS", "10000"))
+_DEFAULT_UNIT_MIN_QUESTIONS = int(os.getenv("LLM_UNIT_MIN_QUESTIONS", "5"))
+# RAG for a single unit title can be nearly empty (e.g. topic not in source); then merge broad context.
+_MIN_UNIT_RAG_CHARS = int(os.getenv("LLM_MIN_UNIT_RAG_CHARS", "900"))
+_MIN_SAVED_THEORY_CHARS = int(os.getenv("LLM_MIN_SAVED_THEORY_CHARS", "200"))
+_MIN_SAVED_QUESTIONS = int(os.getenv("LLM_MIN_SAVED_QUESTIONS", "3"))
+# Extra LLM call per unit: paraphrases / synonyms for richer, less redundant retrieval.
+_UNIT_QUERY_EXPAND_MAX_TOKENS = int(os.getenv("LLM_UNIT_QUERY_EXPAND_MAX_TOKENS", "500"))
+_DEFAULT_UNIT_MULTI_TOPK = int(os.getenv("LLM_UNIT_MULTI_TOPK", "12"))
 
 
 def strip_light_markdown_for_ui(text: str) -> str:
@@ -125,16 +140,17 @@ def _normalize_goals_with_llm(plan: Plan, llm: LLMClient) -> List[str]:
     return result
 
 
-def _generate_course_structure_with_llm(plan: Plan, context: str, topics: List[str], llm: LLMClient) -> Dict[str, Any]:
+def _generate_course_outline_with_llm(
+    plan: Plan, context: str, topics: List[str], llm: LLMClient
+) -> Dict[str, Any]:
     """
-    Ask LLM to generate full course structure based ONLY on provided context and topics.
+    Step 1 — outline only: section titles and unit titles (no theory/questions here).
     """
     system_prompt = (
-        "You are an assistant that designs a course structure (sections, units, questions) "
-        "STRICTLY based on the provided study materials. Do not invent facts that are not supported "
-        "by the materials. Output must be valid JSON."
+        "You are an assistant that designs a course OUTLINE (sections and unit titles only) "
+        "STRICTLY based on the provided study materials. "
+        "Do not invent major topics not supported by the materials. Output valid JSON only."
     )
-
     topics_str = ", ".join(topics) if topics else "not specified explicitly"
     user_prompt = (
         f"Course title: {plan.title}\n\n"
@@ -142,34 +158,185 @@ def _generate_course_structure_with_llm(plan: Plan, context: str, topics: List[s
         f"User learning topics: {topics_str}\n\n"
         "Study materials (excerpts):\n"
         f"{context}\n\n"
-        "Using ONLY the information in the materials, design a course plan and return JSON with the following structure:\n\n"
+        "Return JSON exactly of the form:\n"
         "{\n"
         '  "sections": [\n'
         "    {\n"
         '      "title": "string",\n'
         '      "units": [\n'
-        "        {\n"
-        '          "title": "string",\n'
-        '          "theory": "1-3 paragraphs of plain text only based only on the materials (no markdown: no **, *, #, or code fences)",\n'
-        '          "questions": [\n'
-        "            {\n"
-        '              "text": "question text (plain only, no markdown)",\n'
-        '              "type": "single_choice" | "multiple_choice" | "open_text" | "code",\n'
-        '              "choices": [\n'
-                '                {"text": "option text plain only", "is_correct": true/false}\n'
-        "              ] (omit or empty array for open_text/code)\n"
-        "            }\n"
-        "          ]\n"
-        "        }\n"
+        '        { "title": "string" }\n'
         "      ]\n"
         "    }\n"
         "  ]\n"
         "}\n\n"
-        "Ensure JSON is valid and does not contain comments."
+        "Rules:\n"
+        "- 3–8 sections typical; each section 2–6 units (prefer more smaller units over one huge unit).\n"
+        "- Unit titles must be specific (not 'Introduction' everywhere).\n"
+        "- Cover user learning topics across the outline.\n"
+        "- No theory or questions in this step — titles only.\n"
+    )
+    logger.info("[generate] LLM: course outline (sections / unit titles)...")
+    return llm.complete_json(
+        system_prompt,
+        user_prompt,
+        max_tokens=_DEFAULT_OUTLINE_MAX_TOKENS,
+        temperature=0.2,
     )
 
-    logger.info("[generate] Asking LLM for course structure (sections/units/questions)...")
-    return llm.complete_json(system_prompt, user_prompt)
+
+def _expand_unit_search_queries_llm(
+    llm: LLMClient,
+    section_title: str,
+    unit_title: str,
+    topics: List[str],
+    base_query: str,
+) -> List[str]:
+    """
+    Short LLM step: diverse search strings for embedding retrieval (synonyms, related concepts).
+    """
+    if os.getenv("LLM_UNIT_QUERY_EXPAND", "1").lower() in ("0", "false", "no"):
+        return [base_query] if base_query.strip() else [f"{section_title} {unit_title}".strip()]
+
+    topics_str = ", ".join(topics[:8]) if topics else ""
+    try:
+        data = llm.complete_json(
+            "Return ONLY JSON {\"queries\": [\"\", ...]}.\n"
+            "You generate 2–4 SHORT search queries (keywords / short phrases) for semantic search over a textbook. "
+            "They should paraphrase the learning focus: synonyms, equivalent statistical/ML terms, "
+            "and adjacent subtopics that still belong to THIS unit only.\n"
+            "Same language as the unit title is preferred; English technical terms are fine.\n"
+            "No explanations, no numbering outside the JSON.",
+            f"Section: {section_title}\nUnit: {unit_title}\nGoals (hints): {topics_str}\nBase query: {base_query}\n",
+            max_tokens=_UNIT_QUERY_EXPAND_MAX_TOKENS,
+            temperature=0.35,
+        )
+        extra = [str(x).strip() for x in (data.get("queries") or []) if str(x).strip()]
+        out: List[str] = []
+        for q in [base_query.strip()] + extra:
+            if not q:
+                continue
+            if q.lower() not in {x.lower() for x in out}:
+                out.append(q)
+        return out[:6] if out else [base_query]
+    except Exception:
+        logger.warning("[generate] query expand failed; using base query only")
+        return [base_query] if base_query.strip() else [f"{section_title} {unit_title}".strip()]
+
+
+def _generate_unit_payload_with_llm(
+    plan: Plan,
+    section_title: str,
+    unit_title: str,
+    topics: List[str],
+    context: str,
+    llm: LLMClient,
+) -> Dict[str, Any]:
+    """
+    Step 2 — one unit: long theory + many questions, grounded in context.
+    """
+    topics_str = ", ".join(topics) if topics else "not specified explicitly"
+    system_prompt = (
+        "You are an assistant that writes ONE study unit (theory + assessment questions) "
+        "from several excerpt blocks of the same source (possibly from different chapters). "
+        "Synthesize a clear explanation in plain language — not copy-pasted sentences; "
+        "combine ideas where it helps, but do NOT add facts that are not supported by the excerpts. "
+        "Plain text only for theory and questions — no markdown. Output valid JSON."
+    )
+    user_prompt = (
+        f"Course: {plan.title}\n"
+        f"Section: {section_title}\n"
+        f"Unit: {unit_title}\n"
+        f"Overall learning topics: {topics_str}\n\n"
+        "Excerpts from materials (multiple passages; may overlap or complement each other):\n"
+        f"{context}\n\n"
+        "Return JSON:\n"
+        "{\n"
+        f'  "theory": "string (plain text only, no markdown). Minimum length: aim for '
+        f'{_DEFAULT_UNIT_MIN_QUESTIONS * 120}+ characters of real explanation — multiple paragraphs: '
+        "definitions, intuition, worked intuition or steps if the source supports it, key formulas in plain text if present.\",\n"
+        '  "questions": [\n'
+        "    {\n"
+        '      "text": "string",\n'
+        '      "type": "single_choice" | "multiple_choice" | "open_text" | "code",\n'
+        '      "choices": [{"text": "string", "is_correct": true/false}]\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        f"Requirements: at least {_DEFAULT_UNIT_MIN_QUESTIONS} questions. "
+        "Include at least two single_choice, at least two open_text, and at least one multiple_choice "
+        "(use type code only if the source contains executable-style snippets or algorithms). "
+        "Choice items: at least 4 options; single_choice has exactly one is_correct true; "
+        "multiple_choice has two or more is_correct true. "
+        "Vary difficulty; ask both recall and short applied problems when excerpts allow.\n"
+    )
+    logger.info("[generate] LLM: unit payload %s / %s", section_title[:40], unit_title[:40])
+    return llm.complete_json(
+        system_prompt,
+        user_prompt,
+        max_tokens=_DEFAULT_UNIT_MAX_TOKENS,
+        temperature=0.25,
+    )
+
+
+def _merge_narrow_and_broad_context(narrow: str, broad: str, max_chars: int) -> str:
+    """If per-unit retrieval is thin, append slice of outline-level context so the LLM always sees source text."""
+    n = (narrow or "").strip()
+    b = (broad or "").strip()
+    if len(n) >= _MIN_UNIT_RAG_CHARS:
+        return n[:max_chars]
+    budget = max(0, max_chars - len(n) - 80)
+    merged = (
+        n
+        + "\n\n--- Additional excerpts from the same materials (broader retrieval) ---\n\n"
+        + b[:budget]
+    )
+    return merged[:max_chars]
+
+
+def _unit_payload_meets_minimum(payload: Dict[str, Any]) -> bool:
+    theory = strip_light_markdown_for_ui(str(payload.get("theory") or "")).strip()
+    if len(theory) < _MIN_SAVED_THEORY_CHARS:
+        return False
+    qs = payload.get("questions") or []
+    valid = [
+        q
+        for q in qs
+        if isinstance(q, dict) and str(q.get("text") or "").strip()
+    ]
+    return len(valid) >= _MIN_SAVED_QUESTIONS
+
+
+def _persist_questions_for_unit(unit: Unit, raw_questions: List[Dict[str, Any]]) -> None:
+    unit.questions.all().delete()
+    for q_idx, q in enumerate(raw_questions or [], start=1):
+        q_type = str(q.get("type") or "open_text")
+        if q_type not in {
+            Question.QuestionType.SINGLE_CHOICE,
+            Question.QuestionType.MULTIPLE_CHOICE,
+            Question.QuestionType.OPEN_TEXT,
+            Question.QuestionType.CODE,
+        }:
+            q_type = Question.QuestionType.OPEN_TEXT
+
+        question = Question.objects.create(
+            unit=unit,
+            text=strip_light_markdown_for_ui(str(q.get("text") or "")),
+            type=q_type,
+            difficulty=1,
+            order=q_idx,
+            points=1,
+        )
+        if q_type in {
+            Question.QuestionType.SINGLE_CHOICE,
+            Question.QuestionType.MULTIPLE_CHOICE,
+        }:
+            for c_idx, c in enumerate(q.get("choices") or [], start=1):
+                Choice.objects.create(
+                    question=question,
+                    text=strip_light_markdown_for_ui(str(c.get("text") or "")),
+                    is_correct=bool(c.get("is_correct")),
+                    order=c_idx,
+                )
 
 
 def generate_plan_from_documents(plan: Plan) -> None:
@@ -201,13 +368,18 @@ def generate_plan_from_documents(plan: Plan) -> None:
         pass
 
     try:
-        context = rag.build_context_for_topics(documents, topics)
+        context = rag.build_context_for_topics(
+            documents,
+            topics,
+            top_k_per_topic=_DEFAULT_GENERATION_TOP_K_PER_TOPIC,
+            max_total_chars=_DEFAULT_GENERATION_CONTEXT_CHARS,
+        )
     except Exception:
         # Fallback until doc-level migrations/indexing are fully available.
         parts = []
         total = 0
-        per_doc_cap = 6000
-        max_total_chars = 16000
+        per_doc_cap = min(12_000, _DEFAULT_GENERATION_CONTEXT_CHARS // 2)
+        max_total_chars = _DEFAULT_GENERATION_CONTEXT_CHARS
         from .services_rag import _load_document_text
 
         for doc in documents:
@@ -226,63 +398,143 @@ def generate_plan_from_documents(plan: Plan) -> None:
         context = "\n\n---\n\n".join(parts)
     if not context:
         raise RuntimeError("No context could be built from plan documents")
-    logger.info("[generate] RAG context length: %s chars", len(context))
+    logger.info("[generate] RAG context (outline) length: %s chars", len(context))
 
-    logger.info("[generate] Step 3/4: Generating course structure with LLM...")
-    structure = _generate_course_structure_with_llm(plan, context, topics, llm)
+    logger.info("[generate] Step 3/4: Outline via LLM (sections + unit titles)...")
+    structure = _generate_course_outline_with_llm(plan, context, topics, llm)
 
     sections_data: List[Dict[str, Any]] = structure.get("sections") or []
-    logger.info("[generate] Persisting: %s sections", len(sections_data))
+    if not sections_data:
+        raise RuntimeError("LLM returned empty course outline")
 
+    logger.info("[generate] Persisting skeleton: %s sections", len(sections_data))
     plan.sections.all().delete()
+
     for s_idx, s in enumerate(sections_data, start=1):
         section = Section.objects.create(
             plan=plan,
             title=strip_light_markdown_for_ui(str(s.get("title") or f"Section {s_idx}")),
             order=s_idx,
-            generation_status=Section.GenerationStatus.READY,
+            generation_status=Section.GenerationStatus.GENERATING,
         )
-        for u_idx, u in enumerate(s.get("units") or [], start=1):
-            unit = Unit.objects.create(
+        units_raw = s.get("units") or []
+        for u_idx, u in enumerate(units_raw, start=1):
+            if isinstance(u, dict):
+                utitle = u.get("title")
+            else:
+                utitle = u
+            Unit.objects.create(
                 section=section,
-                title=strip_light_markdown_for_ui(str(u.get("title") or f"Unit {s_idx}.{u_idx}")),
+                title=strip_light_markdown_for_ui(str(utitle or f"Unit {s_idx}.{u_idx}")),
                 order=u_idx,
-                theory=strip_light_markdown_for_ui(str(u.get("theory") or "")),
-                generation_status=Unit.GenerationStatus.READY,
+                theory="",
+                generation_status=Unit.GenerationStatus.GENERATING,
             )
-            for q_idx, q in enumerate(u.get("questions") or [], start=1):
-                q_type = str(q.get("type") or "open_text")
-                # normalize type to expected enum values
-                if q_type not in {
-                    Question.QuestionType.SINGLE_CHOICE,
-                    Question.QuestionType.MULTIPLE_CHOICE,
-                    Question.QuestionType.OPEN_TEXT,
-                    Question.QuestionType.CODE,
-                }:
-                    q_type = Question.QuestionType.OPEN_TEXT
 
-                question = Question.objects.create(
-                    unit=unit,
-                    text=strip_light_markdown_for_ui(str(q.get("text") or "")),
-                    type=q_type,
-                    difficulty=1,
-                    order=q_idx,
-                    points=1,
+    logger.info("[generate] Step 4/4: Filling units one by one (RAG + LLM per unit)...")
+    units_ok = 0
+    units_failed = 0
+    used_chunk_ids: Set[int] = set()
+
+    for section in Section.objects.filter(plan=plan).order_by("order", "id"):
+        for unit in Unit.objects.filter(section=section).order_by("order", "id"):
+            try:
+                query_bits = [section.title, unit.title] + (topics[:8] if topics else [])
+                base_query = ". ".join(strip_light_markdown_for_ui(x) for x in query_bits if x)
+                search_queries = _expand_unit_search_queries_llm(
+                    llm, section.title, unit.title, topics, base_query
                 )
-                # choices for choice questions
-                if q_type in {
-                    Question.QuestionType.SINGLE_CHOICE,
-                    Question.QuestionType.MULTIPLE_CHOICE,
-                }:
-                    for c_idx, c in enumerate(q.get("choices") or [], start=1):
-                        Choice.objects.create(
-                            question=question,
-                            text=strip_light_markdown_for_ui(str(c.get("text") or "")),
-                            is_correct=bool(c.get("is_correct")),
-                            order=c_idx,
-                        )
+                try:
+                    unit_ctx, picked_ids = rag.build_context_multiquery(
+                        documents,
+                        search_queries,
+                        top_k_per_query=_DEFAULT_UNIT_MULTI_TOPK,
+                        max_total_chars=_DEFAULT_UNIT_CONTEXT_CHARS,
+                        exclude_chunk_ids=used_chunk_ids,
+                    )
+                    used_chunk_ids |= picked_ids
+                except Exception:
+                    unit_ctx = ""
+                    picked_ids = set()
 
-    plan.generation_status = Plan.GenerationStatus.READY
+                if len((unit_ctx or "").strip()) < _MIN_UNIT_RAG_CHARS:
+                    unit_ctx = _merge_narrow_and_broad_context(unit_ctx, context, _DEFAULT_UNIT_CONTEXT_CHARS)
+
+                payload = _generate_unit_payload_with_llm(
+                    plan,
+                    section.title,
+                    unit.title,
+                    topics,
+                    unit_ctx,
+                    llm,
+                )
+                if not _unit_payload_meets_minimum(payload):
+                    logger.warning(
+                        "[generate] Thin LLM payload for unit id=%s (%s), retry with broad outline context",
+                        unit.id,
+                        unit.title[:60],
+                    )
+                    payload = _generate_unit_payload_with_llm(
+                        plan,
+                        section.title,
+                        unit.title,
+                        topics,
+                        context[:_DEFAULT_UNIT_CONTEXT_CHARS],
+                        llm,
+                    )
+                if not _unit_payload_meets_minimum(payload):
+                    n_theory = len(strip_light_markdown_for_ui(str(payload.get("theory") or "")).strip())
+                    n_q = len(
+                        [
+                            q
+                            for q in (payload.get("questions") or [])
+                            if isinstance(q, dict) and str(q.get("text") or "").strip()
+                        ]
+                    )
+                    raise ValueError(
+                        f"Insufficient generated content after retry (theory_chars={n_theory}, questions={n_q}). "
+                        "Try different goals or materials."
+                    )
+
+                theory = strip_light_markdown_for_ui(str(payload.get("theory") or ""))
+                unit.theory = theory
+                unit.save(update_fields=["theory"])
+                _persist_questions_for_unit(unit, payload.get("questions") or [])
+                unit.generation_status = Unit.GenerationStatus.READY
+                unit.save(update_fields=["generation_status"])
+                units_ok += 1
+                logger.info(
+                    "[generate] unit id=%s OK: theory_chars=%s question_count=%s",
+                    unit.id,
+                    len(theory),
+                    unit.questions.count(),
+                )
+            except Exception as exc:
+                logger.exception("[generate] Unit id=%s failed: %s", unit.id, exc)
+                unit.theory = strip_light_markdown_for_ui(
+                    "Модуль не удалось сгенерировать автоматически. Попробуйте запустить генерацию снова "
+                    f"или упростите цели. Детали: {str(exc)[:240]}"
+                )
+                unit.generation_status = Unit.GenerationStatus.FAILED
+                unit.save(update_fields=["theory", "generation_status"])
+                units_failed += 1
+
+        if Unit.objects.filter(section=section, generation_status=Unit.GenerationStatus.READY).exists():
+            section.generation_status = Section.GenerationStatus.READY
+        else:
+            section.generation_status = Section.GenerationStatus.FAILED
+        section.save(update_fields=["generation_status"])
+
+    if units_ok == 0:
+        plan.generation_status = Plan.GenerationStatus.FAILED
+    else:
+        plan.generation_status = Plan.GenerationStatus.READY
     plan.save(update_fields=["generation_status"])
-    logger.info("[generate] Plan status set to READY.")
+    logger.info(
+        "[generate] Done: plan_id=%s units_ok=%s units_failed=%s plan_status=%s",
+        plan.id,
+        units_ok,
+        units_failed,
+        plan.generation_status,
+    )
 

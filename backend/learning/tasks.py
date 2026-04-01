@@ -315,3 +315,34 @@ def extract_document_topics_task(self, document_id: int) -> int:
         doc.topics_error = str(exc)[:2000]
         doc.save(update_fields=["topics_status", "topics_error"])
         raise
+
+
+@shared_task
+def generate_plan_task(plan_id: int) -> None:
+    """
+    Background course generation: outline first (persisted), then each unit filled incrementally.
+    Frontend polls PlanDetail until generation_status != processing.
+    """
+    from .models import Plan
+    from .services_generation import generate_plan_from_documents
+    from .services_rag import InsufficientCoverageError
+
+    try:
+        plan = Plan.objects.get(pk=plan_id)
+    except Plan.DoesNotExist:
+        logger.warning("[generate] plan %s not found", plan_id)
+        return
+
+    try:
+        generate_plan_from_documents(plan)
+    except InsufficientCoverageError as exc:
+        logger.warning("[generate] plan %s insufficient coverage: %s", plan_id, exc)
+        plan.refresh_from_db()
+        plan.generation_status = Plan.GenerationStatus.FAILED
+        plan.save(update_fields=["generation_status"])
+    except Exception:
+        logger.exception("[generate] plan %s task failed", plan_id)
+        plan.refresh_from_db()
+        if plan.generation_status == Plan.GenerationStatus.PROCESSING:
+            plan.generation_status = Plan.GenerationStatus.FAILED
+            plan.save(update_fields=["generation_status"])

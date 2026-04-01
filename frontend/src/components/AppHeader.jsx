@@ -69,6 +69,16 @@ export default function AppHeader() {
           {user && profileOpen && (
             <div className={styles.profileDropdown}>
               <p className={styles.profileName}>{user.firstName} {user.lastName}</p>
+              <button
+                type="button"
+                className={styles.profileMenuBtn}
+                onClick={() => {
+                  navigate('/plans')
+                  setProfileOpen(false)
+                }}
+              >
+                Планы
+              </button>
               <p role="button" tabIndex={0} className={styles.logoutText} onClick={() => { logout(); setProfileOpen(false); }} onKeyDown={(e) => e.key === 'Enter' && (logout(), setProfileOpen(false))}>
                 Log out
               </p>

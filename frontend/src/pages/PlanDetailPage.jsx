@@ -49,6 +49,32 @@ export default function PlanDetailPage() {
     }
   }, [id, user])
 
+  useEffect(() => {
+    if (!user || !plan || plan.generation_status !== 'processing') return undefined
+    const tick = async () => {
+      try {
+        const [data, progress] = await Promise.all([
+          plansApi.getPlan(id),
+          plansApi.getPlanProgress(id).catch(() => null),
+        ])
+        setPlan(data)
+        setPlanProgress(progress)
+      } catch (_) {
+        /* keep last good state */
+      }
+    }
+    void tick()
+    const interval = setInterval(tick, 2500)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void tick()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [user, id, plan?.generation_status])
+
   const handleDeleteDocument = async (documentId) => {
     if (!id || !documentId) return
     if (!window.confirm('Delete this material from the plan? The file, embeddings and extracted topics will be removed from the database.')) {
@@ -77,6 +103,12 @@ export default function PlanDetailPage() {
     try {
       const data = await plansApi.generatePlan(id)
       setPlan(data)
+      try {
+        const progress = await plansApi.getPlanProgress(id).catch(() => null)
+        setPlanProgress(progress)
+      } catch (_) {
+        /* ignore */
+      }
     } catch (e) {
       setGenerateError(e.body?.detail || e.message || 'Generation failed')
     } finally {
@@ -120,29 +152,47 @@ export default function PlanDetailPage() {
             <p className={styles.muted}>Loading sections...</p>
           ) : error ? (
             <p className={styles.error}>{error}</p>
-          ) : plan?.generation_status === 'processing' ? (
-            <p className={styles.muted}>Generating course...</p>
           ) : !plan?.sections?.length ? (
-            <p className={styles.muted}>This plan has no sections yet.</p>
+            plan?.generation_status === 'processing' ? (
+              <p className={styles.muted}>
+                Генерация курса… сейчас создаётся структура разделов (обычно несколько секунд).
+              </p>
+            ) : (
+              <p className={styles.muted}>This plan has no sections yet.</p>
+            )
           ) : (
-            <ul className={styles.sectionList}>
-              {plan.sections.map((section) => (
-                <li key={section.id} className={styles.sectionItem}>
-                  <div className={styles.sectionTitle}>{section.title}</div>
-                  {section.units.length > 0 && (
-                    <ul className={styles.unitList}>
-                      {section.units.map((unit) => (
-                        <li key={unit.id}>
-                          <Link className={styles.unitLink} to={`/units/${unit.id}`}>
-                            {unit.title}
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <>
+              {plan.generation_status === 'processing' && (
+                <p className={styles.generatingBanner}>
+                  Идёт наполнение модулей (теория и вопросы). Список слева уже можно открывать — статусы
+                  «…» у юнитов обновляются по мере готовности.
+                </p>
+              )}
+              <ul className={styles.sectionList}>
+                {plan.sections.map((section) => (
+                  <li key={section.id} className={styles.sectionItem}>
+                    <div className={styles.sectionTitle}>{section.title}</div>
+                    {section.units.length > 0 && (
+                      <ul className={styles.unitList}>
+                        {section.units.map((unit) => (
+                          <li key={unit.id}>
+                            <Link className={styles.unitLink} to={`/units/${unit.id}`}>
+                              {unit.title}
+                            </Link>
+                            {unit.generation_status === 'generating' && (
+                              <span className={styles.unitMeta}> · …</span>
+                            )}
+                            {unit.generation_status === 'failed' && (
+                              <span className={styles.unitMetaError}> · ошибка</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
         <div className={styles.content}>
