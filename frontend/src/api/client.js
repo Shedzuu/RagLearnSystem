@@ -222,9 +222,10 @@ export const plansApi = {
     })
   },
 
-  async generatePlan(planId) {
+  async generatePlan(planId, { content_language = 'auto' } = {}) {
     return request(`/plans/${planId}/generate/`, {
       method: 'POST',
+      body: JSON.stringify({ content_language }),
     })
   },
 }

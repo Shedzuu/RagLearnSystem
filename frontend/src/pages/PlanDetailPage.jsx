@@ -15,6 +15,7 @@ export default function PlanDetailPage() {
   const [loadingPlan, setLoadingPlan] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState('')
+  const [contentLanguage, setContentLanguage] = useState('auto')
   const [deletingDocId, setDeletingDocId] = useState(null)
   const [docDeleteError, setDocDeleteError] = useState('')
 
@@ -35,6 +36,9 @@ export default function PlanDetailPage() {
         ])
         if (!cancelled) {
           setPlan(data)
+          if (data?.content_language) {
+            setContentLanguage(data.content_language)
+          }
           setPlanProgress(progress)
         }
       } catch (e) {
@@ -101,7 +105,7 @@ export default function PlanDetailPage() {
     setGenerateError('')
     setGenerating(true)
     try {
-      const data = await plansApi.generatePlan(id)
+      const data = await plansApi.generatePlan(id, { content_language: contentLanguage })
       setPlan(data)
       try {
         const progress = await plansApi.getPlanProgress(id).catch(() => null)
@@ -205,6 +209,44 @@ export default function PlanDetailPage() {
           )}
           {showGenerateButton && (
             <div className={styles.generateBlock}>
+              <fieldset className={styles.langFieldset}>
+                <legend className={styles.langLegend}>Язык курса</legend>
+                <div className={styles.langOptions}>
+                  <label className={styles.langLabel}>
+                    <input
+                      type="radio"
+                      name="content_language"
+                      value="auto"
+                      checked={contentLanguage === 'auto'}
+                      onChange={() => setContentLanguage('auto')}
+                      disabled={generating}
+                    />
+                    Авто (по целям и материалам)
+                  </label>
+                  <label className={styles.langLabel}>
+                    <input
+                      type="radio"
+                      name="content_language"
+                      value="ru"
+                      checked={contentLanguage === 'ru'}
+                      onChange={() => setContentLanguage('ru')}
+                      disabled={generating}
+                    />
+                    Русский
+                  </label>
+                  <label className={styles.langLabel}>
+                    <input
+                      type="radio"
+                      name="content_language"
+                      value="en"
+                      checked={contentLanguage === 'en'}
+                      onChange={() => setContentLanguage('en')}
+                      disabled={generating}
+                    />
+                    English
+                  </label>
+                </div>
+              </fieldset>
               <button
                 type="button"
                 className={styles.btn}

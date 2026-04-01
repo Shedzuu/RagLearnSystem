@@ -29,6 +29,33 @@ _UNIT_QUERY_EXPAND_MAX_TOKENS = int(os.getenv("LLM_UNIT_QUERY_EXPAND_MAX_TOKENS"
 _DEFAULT_UNIT_MULTI_TOPK = int(os.getenv("LLM_UNIT_MULTI_TOPK", "12"))
 
 
+def _output_language_instruction(plan: Plan) -> str:
+    """Single block appended to LLM prompts so titles/theory/questions stay in one language."""
+    code = getattr(plan, "content_language", None) or Plan.ContentLanguage.AUTO
+    if code not in {
+        Plan.ContentLanguage.AUTO,
+        Plan.ContentLanguage.RU,
+        Plan.ContentLanguage.EN,
+    }:
+        code = Plan.ContentLanguage.AUTO
+    if code == Plan.ContentLanguage.RU:
+        return (
+            "LANGUAGE: Output in Russian only — section titles, unit titles, theory, and every question "
+            "and choice. Latin letters only for usual technical symbols/identifiers (e.g. Python, ML). "
+            "Do not mix in English sentences."
+        )
+    if code == Plan.ContentLanguage.EN:
+        return (
+            "LANGUAGE: Output in English only — section titles, unit titles, theory, and every question "
+            "and choice. Do not use Cyrillic."
+        )
+    return (
+        "LANGUAGE: Infer one working language from the user's goals and the study-material excerpts. "
+        "Use that language consistently for all titles, theory, and questions. If goals and excerpts "
+        "conflict, follow the excerpts. Never mix two natural languages in the same unit."
+    )
+
+
 def strip_light_markdown_for_ui(text: str) -> str:
     """
     Remove bold/underscore markdown that the UI shows verbatim (no markdown renderer).
@@ -123,14 +150,33 @@ def _normalize_goals_with_llm(plan: Plan, llm: LLMClient) -> List[str]:
     if not plan.goals:
         return []
 
-    system_prompt = (
-        "You are an assistant that extracts learning topics from user goals. "
-        "Return a JSON object with a single field 'topics' which is an array of short English phrases."
-    )
+    lang = getattr(plan, "content_language", None) or Plan.ContentLanguage.AUTO
+    if lang == Plan.ContentLanguage.RU:
+        topics_rule = (
+            "Return a JSON object with a single field 'topics' which is an array of short Russian phrases "
+            "(learning-focus labels for search), without explanations."
+        )
+        user_topics = "Extract and normalize them into 3-10 concise topics in Russian, without explanations."
+    elif lang == Plan.ContentLanguage.EN:
+        topics_rule = (
+            "Return a JSON object with a single field 'topics' which is an array of short English phrases."
+        )
+        user_topics = "Extract and normalize them into 3-10 concise topics in English, without explanations."
+    else:
+        topics_rule = (
+            "Return a JSON object with a single field 'topics' which is an array of short phrases. "
+            "Use Russian if the goals are mainly in Cyrillic, otherwise English."
+        )
+        user_topics = (
+            "Extract and normalize them into 3-10 concise topics in that same language, without explanations."
+        )
+
+    system_prompt = "You are an assistant that extracts learning topics from user goals. " + topics_rule
     user_prompt = (
         "User's raw learning goals:\n\n"
         f"{plan.goals}\n\n"
-        "Extract and normalize them into 3-10 concise topics (English), without explanations."
+        f"{user_topics}\n\n"
+        f"{_output_language_instruction(plan)}"
     )
     logger.info("[generate] Normalizing goals -> topics (LLM)...")
     data = llm.complete_json(system_prompt, user_prompt)
@@ -158,6 +204,7 @@ def _generate_course_outline_with_llm(
         f"User learning topics: {topics_str}\n\n"
         "Study materials (excerpts):\n"
         f"{context}\n\n"
+        f"{_output_language_instruction(plan)}\n\n"
         "Return JSON exactly of the form:\n"
         "{\n"
         '  "sections": [\n'
@@ -185,6 +232,7 @@ def _generate_course_outline_with_llm(
 
 
 def _expand_unit_search_queries_llm(
+    plan: Plan,
     llm: LLMClient,
     section_title: str,
     unit_title: str,
@@ -204,7 +252,9 @@ def _expand_unit_search_queries_llm(
             "You generate 2–4 SHORT search queries (keywords / short phrases) for semantic search over a textbook. "
             "They should paraphrase the learning focus: synonyms, equivalent statistical/ML terms, "
             "and adjacent subtopics that still belong to THIS unit only.\n"
-            "Same language as the unit title is preferred; English technical terms are fine.\n"
+            f"{_output_language_instruction(plan)}\n"
+            "For queries: prefer the same language as required for course content; mix in standard English "
+            "technical tokens only if they help retrieval.\n"
             "No explanations, no numbering outside the JSON.",
             f"Section: {section_title}\nUnit: {unit_title}\nGoals (hints): {topics_str}\nBase query: {base_query}\n",
             max_tokens=_UNIT_QUERY_EXPAND_MAX_TOKENS,
@@ -240,7 +290,8 @@ def _generate_unit_payload_with_llm(
         "from several excerpt blocks of the same source (possibly from different chapters). "
         "Synthesize a clear explanation in plain language — not copy-pasted sentences; "
         "combine ideas where it helps, but do NOT add facts that are not supported by the excerpts. "
-        "Plain text only for theory and questions — no markdown. Output valid JSON."
+        "Plain text only for theory and questions — no markdown. Output valid JSON.\n"
+        f"{_output_language_instruction(plan)}"
     )
     user_prompt = (
         f"Course: {plan.title}\n"
@@ -442,7 +493,7 @@ def generate_plan_from_documents(plan: Plan) -> None:
                 query_bits = [section.title, unit.title] + (topics[:8] if topics else [])
                 base_query = ". ".join(strip_light_markdown_for_ui(x) for x in query_bits if x)
                 search_queries = _expand_unit_search_queries_llm(
-                    llm, section.title, unit.title, topics, base_query
+                    plan, llm, section.title, unit.title, topics, base_query
                 )
                 try:
                     unit_ctx, picked_ids = rag.build_context_multiquery(
@@ -511,10 +562,17 @@ def generate_plan_from_documents(plan: Plan) -> None:
                 )
             except Exception as exc:
                 logger.exception("[generate] Unit id=%s failed: %s", unit.id, exc)
-                unit.theory = strip_light_markdown_for_ui(
-                    "Модуль не удалось сгенерировать автоматически. Попробуйте запустить генерацию снова "
-                    f"или упростите цели. Детали: {str(exc)[:240]}"
-                )
+                if getattr(plan, "content_language", None) == Plan.ContentLanguage.EN:
+                    fail_msg = (
+                        "This unit could not be generated automatically. Try running generation again "
+                        f"or simplify your goals. Details: {str(exc)[:240]}"
+                    )
+                else:
+                    fail_msg = (
+                        "Модуль не удалось сгенерировать автоматически. Попробуйте запустить генерацию снова "
+                        f"или упростите цели. Детали: {str(exc)[:240]}"
+                    )
+                unit.theory = strip_light_markdown_for_ui(fail_msg)
                 unit.generation_status = Unit.GenerationStatus.FAILED
                 unit.save(update_fields=["theory", "generation_status"])
                 units_failed += 1

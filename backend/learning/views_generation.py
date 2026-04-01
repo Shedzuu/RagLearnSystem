@@ -37,10 +37,24 @@ class PlanGenerateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        raw_lang = request.data.get("content_language")
+        allowed = {
+            Plan.ContentLanguage.AUTO,
+            Plan.ContentLanguage.RU,
+            Plan.ContentLanguage.EN,
+        }
+        if raw_lang in allowed:
+            lang = raw_lang
+        elif isinstance(raw_lang, str) and raw_lang.strip().lower() in allowed:
+            lang = raw_lang.strip().lower()
+        else:
+            lang = plan.content_language
+
         use_sync = os.getenv("GENERATE_PLAN_SYNC", "").lower() in ("1", "true", "yes")
 
+        plan.content_language = lang
         plan.generation_status = Plan.GenerationStatus.PROCESSING
-        plan.save(update_fields=["generation_status"])
+        plan.save(update_fields=["content_language", "generation_status"])
         logger.info(
             "[generate] Plan %s: queued generation (documents=%s, sync=%s)",
             plan_id,

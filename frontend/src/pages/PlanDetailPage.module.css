@@ -157,6 +157,40 @@
   margin-top: 1.5rem;
 }
 
+.langFieldset {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--header-border);
+  border-radius: 8px;
+  max-width: 28rem;
+}
+
+.langLegend {
+  padding: 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.langOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.langLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.langLabel input {
+  margin: 0;
+}
+
 .btn {
   padding: 0.6rem 1.2rem;
   font-size: 1rem;

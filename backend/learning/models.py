@@ -13,6 +13,11 @@ class Plan(models.Model):
         READY = "ready", "Ready"
         FAILED = "failed", "Failed"
 
+    class ContentLanguage(models.TextChoices):
+        AUTO = "auto", "Auto"
+        RU = "ru", "Russian"
+        EN = "en", "English"
+
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="plans")
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
@@ -21,6 +26,11 @@ class Plan(models.Model):
         max_length=20,
         choices=GenerationStatus.choices,
         default=GenerationStatus.PENDING,
+    )
+    content_language = models.CharField(
+        max_length=10,
+        choices=ContentLanguage.choices,
+        default=ContentLanguage.AUTO,
     )
     is_public = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
