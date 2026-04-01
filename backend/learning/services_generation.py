@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import List, Dict, Any
@@ -11,6 +12,23 @@ from .models import Plan, Section, Unit, Question, Choice
 from .services_rag import DocumentRAGService, index_documents
 
 logger = logging.getLogger(__name__)
+
+
+def strip_light_markdown_for_ui(text: str) -> str:
+    """
+    Remove bold/underscore markdown that the UI shows verbatim (no markdown renderer).
+    Keeps plain text; strips **word** and __word__ repeatedly.
+    """
+    if not text:
+        return ""
+    s = str(text)
+    for _ in range(16):
+        nxt = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
+        nxt = re.sub(r"__([^_]+)__", r"\1", nxt)
+        if nxt == s:
+            break
+        s = nxt
+    return s
 
 
 class LLMClient:
@@ -37,7 +55,14 @@ class LLMClient:
         self._client = OpenAI(api_key=self.api_key, **({"base_url": base_url} if base_url else {}))
         self.model_name = os.getenv("LLM_MODEL", "gpt-4.1-mini")
 
-    def complete_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+    def complete_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        max_tokens: int | None = None,
+        temperature: float = 0.2,
+    ) -> Dict[str, Any]:
         """
         Call the model and expect JSON in the response.
         """
@@ -45,6 +70,9 @@ class LLMClient:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
+        kwargs: dict = {"temperature": temperature}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
@@ -52,7 +80,7 @@ class LLMClient:
                     model=self.model_name,
                     messages=messages,
                     response_format={"type": "json_object"},
-                    temperature=0.2,
+                    **kwargs,
                 )
                 content = resp.choices[0].message.content
                 if not content:
@@ -122,13 +150,13 @@ def _generate_course_structure_with_llm(plan: Plan, context: str, topics: List[s
         '      "units": [\n'
         "        {\n"
         '          "title": "string",\n'
-        '          "theory": "1-3 paragraphs of explanation based only on the materials",\n'
+        '          "theory": "1-3 paragraphs of plain text only based only on the materials (no markdown: no **, *, #, or code fences)",\n'
         '          "questions": [\n'
         "            {\n"
-        '              "text": "question text",\n'
+        '              "text": "question text (plain only, no markdown)",\n'
         '              "type": "single_choice" | "multiple_choice" | "open_text" | "code",\n'
         '              "choices": [\n'
-        '                {"text": "option text", "is_correct": true/false}\n'
+                '                {"text": "option text plain only", "is_correct": true/false}\n'
         "              ] (omit or empty array for open_text/code)\n"
         "            }\n"
         "          ]\n"
@@ -210,16 +238,16 @@ def generate_plan_from_documents(plan: Plan) -> None:
     for s_idx, s in enumerate(sections_data, start=1):
         section = Section.objects.create(
             plan=plan,
-            title=str(s.get("title") or f"Section {s_idx}"),
+            title=strip_light_markdown_for_ui(str(s.get("title") or f"Section {s_idx}")),
             order=s_idx,
             generation_status=Section.GenerationStatus.READY,
         )
         for u_idx, u in enumerate(s.get("units") or [], start=1):
             unit = Unit.objects.create(
                 section=section,
-                title=str(u.get("title") or f"Unit {s_idx}.{u_idx}"),
+                title=strip_light_markdown_for_ui(str(u.get("title") or f"Unit {s_idx}.{u_idx}")),
                 order=u_idx,
-                theory=str(u.get("theory") or ""),
+                theory=strip_light_markdown_for_ui(str(u.get("theory") or "")),
                 generation_status=Unit.GenerationStatus.READY,
             )
             for q_idx, q in enumerate(u.get("questions") or [], start=1):
@@ -235,7 +263,7 @@ def generate_plan_from_documents(plan: Plan) -> None:
 
                 question = Question.objects.create(
                     unit=unit,
-                    text=str(q.get("text") or ""),
+                    text=strip_light_markdown_for_ui(str(q.get("text") or "")),
                     type=q_type,
                     difficulty=1,
                     order=q_idx,
@@ -249,7 +277,7 @@ def generate_plan_from_documents(plan: Plan) -> None:
                     for c_idx, c in enumerate(q.get("choices") or [], start=1):
                         Choice.objects.create(
                             question=question,
-                            text=str(c.get("text") or ""),
+                            text=strip_light_markdown_for_ui(str(c.get("text") or "")),
                             is_correct=bool(c.get("is_correct")),
                             order=c_idx,
                         )

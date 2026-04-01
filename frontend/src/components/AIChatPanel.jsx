@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { plansApi } from '../api/client'
+import { stripLightMarkdown } from '../utils/plainChatText'
 import styles from './AIChatPanel.module.css'
 
 export default function AIChatPanel({ unitId, questionContext, onClearQuestion }) {
@@ -84,7 +85,7 @@ export default function AIChatPanel({ unitId, questionContext, onClearQuestion }
             key={i}
             className={msg.role === 'user' ? styles.msgUser : styles.msgAssistant}
           >
-            <div className={styles.msgContent}>{msg.content}</div>
+            <div className={styles.msgContent}>{stripLightMarkdown(msg.content)}</div>
           </div>
         ))}
         {loading && (

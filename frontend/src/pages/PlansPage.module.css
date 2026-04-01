@@ -24,7 +24,49 @@
 .title {
   font-size: 28px;
   font-weight: 700;
+  margin: 0;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 24px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.primaryBtn,
+.secondaryBtn {
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.primaryBtn {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.primaryBtn:hover {
+  background: #1d4ed8;
+}
+
+.secondaryBtn {
+  background: #fff;
+  color: #111827;
+}
+
+.secondaryBtn:hover {
+  background: #f3f4f6;
 }
 
 .error {

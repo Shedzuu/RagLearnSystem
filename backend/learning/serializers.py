@@ -42,13 +42,55 @@ class PlanListSerializer(serializers.ModelSerializer):
       read_only_fields = ("id", "generation_status", "created_at")
 
 
+class DocumentSerializer(serializers.ModelSerializer):
+  class Meta:
+      model = Document
+      fields = (
+          "id",
+          "original_name",
+          "file_path",
+          "file_size",
+          "plan_id",
+          "uploaded_at",
+          "index_status",
+          "topics_status",
+          "extracted_topics",
+          "extracted_outline",
+          "index_error",
+          "topics_error",
+      )
+      read_only_fields = (
+          "id",
+          "file_path",
+          "file_size",
+          "plan_id",
+          "uploaded_at",
+          "index_status",
+          "topics_status",
+          "extracted_topics",
+          "extracted_outline",
+          "index_error",
+          "topics_error",
+      )
+
+
 class PlanDetailSerializer(serializers.ModelSerializer):
   sections = SectionSerializer(many=True, read_only=True)
+  documents = DocumentSerializer(many=True, read_only=True)
 
   class Meta:
       model = Plan
-      fields = ("id", "title", "description", "goals", "generation_status", "created_at", "sections")
-      read_only_fields = ("id", "generation_status", "created_at", "sections")
+      fields = (
+          "id",
+          "title",
+          "description",
+          "goals",
+          "generation_status",
+          "created_at",
+          "sections",
+          "documents",
+      )
+      read_only_fields = ("id", "generation_status", "created_at", "sections", "documents")
 
 
 class UnitDetailSerializer(serializers.ModelSerializer):
@@ -60,13 +102,6 @@ class UnitDetailSerializer(serializers.ModelSerializer):
       model = Unit
       fields = ("id", "title", "order", "theory", "generation_status", "section_id", "plan_id", "questions")
       read_only_fields = ("id", "generation_status", "section_id", "plan_id", "questions")
-
-
-class DocumentSerializer(serializers.ModelSerializer):
-  class Meta:
-      model = Document
-      fields = ("id", "original_name", "file_path", "file_size", "plan_id", "uploaded_at")
-      read_only_fields = ("id", "file_path", "file_size", "plan_id", "uploaded_at")
 
 
 class AnswerChoiceCreateSerializer(serializers.Serializer):

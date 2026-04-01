@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Document
-from .services_rag import index_documents
+from .tasks import index_document_task
 
 
 class FreeDocumentUploadView(APIView):
@@ -44,15 +44,20 @@ class FreeDocumentUploadView(APIView):
             defaults={
                 "original_name": filename,
                 "file_size": uploaded_file.size,
+                "index_status": Document.IndexStatus.PENDING,
+                "topics_status": Document.TopicsStatus.IDLE,
+                "extracted_topics": [],
+                "extracted_outline": [],
             },
         )
 
-        # Index document chunks + embeddings immediately for pre-plan AI chat.
-        try:
-            index_documents([doc])
-        except Exception:
-            # Indexing failures should not block upload; user can still attach docs to plan.
-            pass
+        if doc.index_status != Document.IndexStatus.PROCESSING:
+            doc.index_status = Document.IndexStatus.PROCESSING
+            doc.topics_status = Document.TopicsStatus.IDLE
+            doc.index_error = ""
+            doc.topics_error = ""
+            doc.save(update_fields=["index_status", "topics_status", "index_error", "topics_error"])
+            index_document_task.delay(doc.id)
 
         return Response(
             {
@@ -60,6 +65,8 @@ class FreeDocumentUploadView(APIView):
                 "original_name": doc.original_name,
                 "file_path": doc.file_path,
                 "file_size": doc.file_size,
+                "index_status": doc.index_status,
+                "topics_status": doc.topics_status,
             },
             status=status.HTTP_201_CREATED,
         )

@@ -1,7 +1,11 @@
 from django.urls import path
 
 from . import views
-from .views_documents import DocumentListView, AttachDocumentsToPlanView
+from .views_documents import (
+    DocumentListView,
+    AttachDocumentsToPlanView,
+    PlanDocumentDeleteView,
+)
 from .views_upload_free import FreeDocumentUploadView
 from .views_generation import PlanGenerateView
 
@@ -18,6 +22,11 @@ urlpatterns = [
         "plans/<int:plan_id>/attach-documents/",
         AttachDocumentsToPlanView.as_view(),
         name="plan-attach-documents",
+    ),
+    path(
+        "plans/<int:plan_id>/documents/<int:document_id>/",
+        PlanDocumentDeleteView.as_view(),
+        name="plan-document-delete",
     ),
     path(
         "plans/<int:plan_id>/generate/",

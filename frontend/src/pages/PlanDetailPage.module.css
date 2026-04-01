@@ -163,3 +163,65 @@
   color: var(--text-muted);
 }
 
+.materialsBlock {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--header-border);
+  max-width: 42rem;
+}
+
+.materialsTitle {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.materialsList {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.materialRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--card-bg);
+  border: 1px solid var(--header-border);
+  border-radius: 8px;
+}
+
+.materialName {
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.btnDanger {
+  flex-shrink: 0;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #fff;
+  background: #b91c1c;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btnDanger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btnDanger:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { plansApi } from '../api/client'
+import { stripLightMarkdown } from '../utils/plainChatText'
 import styles from './PreplanChatPanel.module.css'
 
 export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApplyGoals }) {
@@ -22,9 +23,15 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
 
   if (!isOpen) return null
 
-  const sendMessage = async (text) => {
+  const resolveMode = (text, requestedMode = 'auto') => {
+    if (requestedMode === 'semantic' || requestedMode === 'exact') return requestedMode
+    return 'auto'
+  }
+
+  const sendMessage = async (text, mode = 'auto') => {
     const trimmed = (text || '').trim()
     if (!trimmed || loading) return
+    const resolvedMode = resolveMode(trimmed, mode)
 
     const userMsg = { role: 'user', content: trimmed }
     const updated = [...messages, userMsg]
@@ -33,13 +40,39 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
     setLoading(true)
 
     try {
+      const serializedHistory = updated.map((m) => {
+        if (m.kind === 'exact_topics') {
+          const lines = (m.exactTopics || []).map((t) => {
+            const title = t?.title || ''
+            const page = t?.page === null || t?.page === undefined ? 'unknown' : String(t.page)
+            return `- ${title} (page: ${page})`
+          })
+          return {
+            role: m.role,
+            content: `Exact topics from sources:\n${lines.join('\n')}`,
+          }
+        }
+        return { role: m.role, content: m.content }
+      })
       const res = await plansApi.sendPreplanChat({
         documentIds,
         message: trimmed,
-        history: updated.map((m) => ({ role: m.role, content: m.content })),
+        history: serializedHistory,
+        mode: resolvedMode,
       })
       if (res.suggested_goals) setSuggestedGoals(res.suggested_goals)
-      setMessages((prev) => [...prev, { role: 'assistant', content: res.reply || '' }])
+      setMessages((prev) => {
+        const next = [...prev, { role: 'assistant', content: res.reply || '' }]
+        if (resolvedMode === 'exact' && Array.isArray(res.exact_topics) && res.exact_topics.length > 0) {
+          next.push({
+            role: 'assistant',
+            content: '',
+            kind: 'exact_topics',
+            exactTopics: res.exact_topics,
+          })
+        }
+        return next
+      })
     } catch (e) {
       const msg =
         e?.body?.detail ||
@@ -81,6 +114,19 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
             >
               Analyze materials
             </button>
+            <button
+              type="button"
+              className={styles.quickBtn}
+              onClick={() =>
+                sendMessage(
+                  'Extract exact topic names from the selected materials. Do not paraphrase.',
+                  'exact'
+                )
+              }
+              disabled={loading}
+            >
+              Extract exact topics
+            </button>
             {suggestedGoals && (
               <button
                 type="button"
@@ -103,7 +149,41 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
           )}
           {messages.map((msg, i) => (
             <div key={i} className={msg.role === 'user' ? styles.msgUser : styles.msgAssistant}>
-              <div className={styles.msgContent}>{msg.content}</div>
+              <div className={styles.msgContent}>
+                {msg.kind === 'exact_topics' ? (
+                  <section className={styles.exactTopicsBox}>
+                    <div className={styles.exactTopicsHeader}>
+                      <strong>Exact topics from sources</strong>
+                      <button
+                        type="button"
+                        className={styles.applyBtn}
+                        onClick={() =>
+                          onApplyGoals(
+                            (msg.exactTopics || [])
+                              .map((item) => `- ${item?.title || ''}`.trim())
+                              .filter((line) => line !== '-')
+                              .join('\n')
+                          )
+                        }
+                      >
+                        Use exact topics in goals
+                      </button>
+                    </div>
+                    <ul className={styles.exactTopicsList}>
+                      {(msg.exactTopics || []).map((item, idx) => (
+                        <li key={`${item?.title || 'topic'}-${idx}`} className={styles.exactTopicItem}>
+                          <div className={styles.exactTopicTitle}>{item?.title || 'Untitled topic'}</div>
+                          <div className={styles.exactTopicMeta}>
+                            {item?.page === null || item?.page === undefined ? 'page: unknown' : `page: ${item.page}`}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : (
+                  stripLightMarkdown(msg.content)
+                )}
+              </div>
             </div>
           ))}
           {loading && (
@@ -122,13 +202,13 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
             placeholder="Ask AI about topics/goals..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && sendMessage(input)}
+            onKeyDown={(e) => e.key === 'Enter' && sendMessage(input, 'auto')}
             disabled={loading}
           />
           <button
             type="button"
             className={styles.sendBtn}
-            onClick={() => sendMessage(input)}
+            onClick={() => sendMessage(input, 'auto')}
             disabled={loading || !input.trim()}
           >
             ↑

@@ -64,7 +64,25 @@ export default function PlansPage() {
       <AppHeader />
       <main className={styles.main}>
         <div className={styles.card}>
-          <h1 className={styles.title}>My study plans</h1>
+          <div className={styles.headerRow}>
+            <h1 className={styles.title}>My study plans</h1>
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                onClick={() => navigate('/materials')}
+              >
+                Upload materials
+              </button>
+              <button
+                type="button"
+                className={styles.primaryBtn}
+                onClick={() => navigate('/create-plan')}
+              >
+                New plan
+              </button>
+            </div>
+          </div>
           {error && <p className={styles.error}>{error}</p>}
           {loadingPlans ? (
             <p>Loading...</p>

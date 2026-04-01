@@ -163,6 +163,57 @@
   font-style: italic;
 }
 
+.exactTopicsBox {
+  margin-top: 0.5rem;
+  border: 1px solid var(--header-border, #e0e0e0);
+  border-radius: 10px;
+  background: #fcfcfd;
+  padding: 0.7rem;
+}
+
+.exactTopicsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.55rem;
+}
+
+.exactTopicsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.exactTopicItem {
+  border: 1px solid var(--header-border, #ececec);
+  border-radius: 8px;
+  padding: 0.5rem 0.55rem;
+  background: #fff;
+}
+
+.exactTopicTitle {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text, #222);
+}
+
+.exactTopicEvidence {
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-muted, #555);
+  white-space: pre-wrap;
+}
+
+.exactTopicMeta {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
 .inputWrap {
   display: flex;
   gap: 0.4rem;

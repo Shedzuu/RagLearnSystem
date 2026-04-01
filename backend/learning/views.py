@@ -1,7 +1,10 @@
+import json
 import os
+import re
+from pathlib import Path
 
 from django.conf import settings
-from django.db.models import Sum, Count, F
+from django.db.models import Prefetch, Sum, Count, F
 from django.db.models.functions import NullIf
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -31,8 +34,9 @@ from .serializers import (
     UnitDetailSerializer,
     AnswerCreateSerializer,
 )
-from .services_generation import LLMClient
-from .services_rag import DocumentRAGService, index_documents, _load_document_text
+from .services_generation import LLMClient, strip_light_markdown_for_ui
+from .services_rag import DocumentRAGService, _load_document_text
+from .tasks import index_document_task, extract_document_topics_task
 
 
 class PlanListCreateView(generics.ListCreateAPIView):
@@ -52,7 +56,12 @@ class PlanDetailView(generics.RetrieveAPIView):
     queryset = Plan.objects.all()
 
     def get_queryset(self):
-        return Plan.objects.filter(owner=self.request.user)
+        return Plan.objects.filter(owner=self.request.user).prefetch_related(
+            Prefetch(
+                "documents",
+                queryset=Document.objects.order_by("-uploaded_at"),
+            )
+        )
 
 
 class UnitDetailView(generics.RetrieveAPIView):
@@ -660,7 +669,12 @@ class PlanDocumentUploadView(APIView):
             file_path=rel_path,
             original_name=filename,
             file_size=uploaded_file.size,
+            index_status=Document.IndexStatus.PROCESSING,
+            topics_status=Document.TopicsStatus.IDLE,
+            extracted_topics=[],
+            extracted_outline=[],
         )
+        index_document_task.delay(doc.id)
 
         return Response(
             {
@@ -668,6 +682,8 @@ class PlanDocumentUploadView(APIView):
                 "original_name": doc.original_name,
                 "file_path": doc.file_path,
                 "file_size": doc.file_size,
+                "index_status": doc.index_status,
+                "topics_status": doc.topics_status,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -736,7 +752,7 @@ class AiChatView(APIView):
             "but do NOT reveal the exact answer unless explicitly asked.\n"
             "- You can use your own knowledge to provide simpler analogies or examples "
             "beyond the provided theory if it helps the student understand.\n"
-            "- Be concise but thorough. Use markdown formatting.\n\n"
+            "- Be concise but thorough. Plain text only — do not use markdown (no **bold**, no # headings).\n\n"
             f"UNIT THEORY:\n{unit.theory}\n"
             f"{question_context}"
         )
@@ -757,7 +773,7 @@ class AiChatView(APIView):
                 temperature=0.5,
                 max_tokens=1024,
             )
-            reply = resp.choices[0].message.content or ""
+            reply = strip_light_markdown_for_ui(resp.choices[0].message.content or "")
         except Exception as exc:
             return Response(
                 {"detail": f"AI error: {str(exc)}"},
@@ -809,7 +825,7 @@ LANDING_SYSTEM_PROMPT = (
     "- Be friendly, concise, and helpful.\n"
     "- Answer questions about how to use the platform.\n"
     "- If the user asks something unrelated to the platform, politely redirect them.\n"
-    "- Use markdown formatting for clarity.\n"
+    "- Plain text only in answers — no markdown (no ** or #).\n"
     "- Answer in the same language the user writes in."
 )
 
@@ -844,7 +860,7 @@ class LandingChatView(APIView):
                 temperature=0.5,
                 max_tokens=1024,
             )
-            reply = resp.choices[0].message.content or ""
+            reply = strip_light_markdown_for_ui(resp.choices[0].message.content or "")
         except Exception as exc:
             return Response(
                 {"detail": f"AI error: {str(exc)}"},
@@ -863,10 +879,486 @@ class PreplanChatView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    # Single-root wrappers from LLM/TOC — not real "chapters" for exact-topic listing.
+    _TOC_WRAPPER_TITLES = frozenset(
+        {
+            "оглавление",
+            "table of contents",
+            "contents",
+            "содержание",
+            "content",
+            "toc",
+        }
+    )
+
+    @staticmethod
+    def _extract_page_num(text: str) -> int | None:
+        if not text:
+            return None
+        # Prefer page-like number near line end (typical TOC format).
+        matches = re.findall(r"(\d{1,4})\s*$", text.strip())
+        if matches:
+            try:
+                return int(matches[-1])
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _clean_topic_text(text: str) -> str:
+        if not text:
+            return ""
+        s = str(text)
+        # Remove common markdown/OCR artifacts.
+        s = s.replace("**", "")
+        s = re.sub(r"[_]{2,}", " ", s)
+        s = re.sub(r"[.]{3,}", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        # Normalize spaced hyphen artifacts from OCR, e.g. "СЕТКИ -РАБИЦЫ".
+        s = re.sub(r"\s+-\s*", "-", s)
+        return s
+
+    @staticmethod
+    def _leading_chapter_number(title: str) -> int | None:
+        """TOC-style main number at start of title: '3 Linear Regression' -> 3."""
+        if not title:
+            return None
+        t = title.strip()
+        m = re.match(r"^(\d+)(?:\.\s*|\s+|$)", t)
+        if m:
+            return int(m.group(1))
+        return None
+
+    @staticmethod
+    def _resolve_outline_node_by_user_ref(
+        combined_outline: list[dict], topic_ref: int
+    ) -> dict | None:
+        """
+        Map user-facing theme number to outline node.
+        Prefer book chapter number in the title (user says 'тема 3' = chapter 3),
+        not 1-based row index (Preface shifts indices).
+        """
+        if topic_ref < 1 or not combined_outline:
+            return None
+        matches = [
+            node
+            for node in combined_outline
+            if PreplanChatView._leading_chapter_number(node.get("title") or "")
+            == topic_ref
+        ]
+        if matches:
+            return matches[0]
+        if 1 <= topic_ref <= len(combined_outline):
+            return combined_outline[topic_ref - 1]
+        return None
+
+    @staticmethod
+    def _normalize_exact_topics(raw_topics):
+        if not isinstance(raw_topics, list):
+            return []
+        normalized = []
+        seen = set()
+        for item in raw_topics:
+            if not isinstance(item, dict):
+                continue
+            title = PreplanChatView._clean_topic_text(item.get("title") or "")
+            if not title:
+                continue
+            key = title.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+
+            page = item.get("page")
+            if isinstance(page, int):
+                normalized_page = page
+            else:
+                normalized_page = (
+                    PreplanChatView._extract_page_num(title)
+                )
+            normalized.append(
+                {
+                    "title": title,
+                    "page": normalized_page,
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _build_exact_topics_fallback(data: dict) -> list[dict]:
+        """
+        Build exact_topics fallback when model omitted exact_topics field.
+        Uses topics list first, then tries to parse numbered lines from reply.
+        """
+        raw_topics = data.get("topics") or []
+        result = []
+        seen = set()
+
+        if isinstance(raw_topics, list):
+            for t in raw_topics:
+                title = PreplanChatView._clean_topic_text(t)
+                if not title:
+                    continue
+                key = title.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append({"title": title, "page": PreplanChatView._extract_page_num(title)})
+
+        if result:
+            return result
+
+        reply = str(data.get("reply") or "")
+        for line in reply.splitlines():
+            line = PreplanChatView._clean_topic_text(line)
+            if not line:
+                continue
+            if re.match(r"^\d+\.\s+", line) or re.match(r"^[ivxlcdm]+\.\s+", line, flags=re.IGNORECASE):
+                key = line.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append({"title": line, "page": PreplanChatView._extract_page_num(line)})
+        return result
+
+    @staticmethod
+    def _history_has_exact_topics(history) -> bool:
+        if not isinstance(history, list):
+            return False
+        for h in history[-20:]:
+            content = str(h.get("content") or "")
+            if "Exact topics from sources" in content:
+                return True
+        return False
+
+    @staticmethod
+    def _history_has_recent_subtopics_reply(history) -> bool:
+        if not isinstance(history, list):
+            return False
+        for h in reversed(history[-10:]):
+            if str(h.get("role") or "") != "assistant":
+                continue
+            content = str(h.get("content") or "")
+            if "Подтемы для темы" in content:
+                return True
+        return False
+
+    @staticmethod
+    def _route_preplan_mode(llm: LLMClient, message: str, history, requested_mode: str) -> tuple[str, bool]:
+        """
+        Single LLM-based router for mode + detail level.
+        Avoids brittle keyword hardcoding in application logic.
+        """
+        route = llm.complete_json(
+            "You are an intent router for a pre-plan study assistant. "
+            "Return ONLY JSON with keys: mode and wants_full_subtopics_list. "
+            "mode must be exactly 'exact' or 'semantic'. "
+            "wants_full_subtopics_list must be boolean. "
+            "Routing policy: "
+            "- If user asks to extract/list topics from source exactly OR follows up on previously extracted exact topics, choose mode='exact'. "
+            "- If user asks details for a specific previously listed theme (e.g., 'theme 2', 'topic 3', 'subtopics', 'подтемы у 3', 'подтемы у темы 3'), set wants_full_subtopics_list=true. "
+            "- Same if they ask subtopics by theme TITLE (e.g. 'подтемы у темы линейная регрессия', 'subsections for linear regression'): wants_full_subtopics_list=true, mode='exact'. "
+            "- Topic NUMBER means position in the numbered list the assistant showed (1 = first row), NOT necessarily the book's printed chapter number unless titles include that number. "
+            "- Brief affirmations (да/ok) after subtopics were already shown: keep mode='exact', wants_full_subtopics_list=false unless they ask a new question. "
+            "- For general discussion and goals refinement choose mode='semantic'.",
+            (
+                f"Requested mode from client: {requested_mode}\n\n"
+                f"User message:\n{message}\n\n"
+                f"Recent history (last up to 10 turns):\n{json.dumps(history[-10:] if isinstance(history, list) else [], ensure_ascii=False)}"
+            ),
+        )
+        # Respect explicit UI mode to avoid unexpected heavy paths (e.g. semantic RAG when user chose exact).
+        if requested_mode in {"exact", "semantic"}:
+            mode = requested_mode
+        else:
+            mode = str(route.get("mode") or "semantic").strip().lower()
+            if mode not in {"semantic", "exact"}:
+                mode = "semantic"
+        wants_full_subtopics_list = bool(route.get("wants_full_subtopics_list"))
+        return mode, wants_full_subtopics_list
+
+    @staticmethod
+    def _route_exact_outline_action_with_llm(
+        llm: LLMClient,
+        message: str,
+        history,
+        combined_outline: list[dict],
+    ) -> dict:
+        """
+        LLM decides whether user asks for top-level themes or subtopics,
+        and if subtopics are requested — which exact top-level theme.
+        """
+        themes = [
+            {
+                "index": i + 1,
+                "title": str(node.get("title") or ""),
+            }
+            for i, node in enumerate(combined_outline)
+        ]
+        route = llm.complete_json(
+            "You are a strict router for exact-topic mode in a study assistant. "
+            "Return ONLY JSON object with keys: action, theme_index, confidence, reasoning. "
+            "action must be 'list_main' or 'list_subtopics'. "
+            "theme_index must be integer or null. "
+            "confidence must be number 0..1. "
+            "reasoning must be short string. "
+            "Policy: "
+            "- If user asks to show exact main themes, choose action='list_main'. "
+            "- If user asks for subtopics/subsections of a specific theme (by number OR by title, including misspellings), choose action='list_subtopics' and return resolved theme_index from provided list (1-based). "
+            "- If message is a short confirmation like 'да/ok/yes' without a new explicit target, choose action='list_main', theme_index=null. "
+            "- If ambiguous, prefer action='list_main'.",
+            (
+                f"User message:\n{message}\n\n"
+                f"Recent history (last up to 10 turns):\n{json.dumps(history[-10:] if isinstance(history, list) else [], ensure_ascii=False)}\n\n"
+                f"Top-level themes (1-based):\n{json.dumps(themes, ensure_ascii=False)}"
+            ),
+        )
+        if not isinstance(route, dict):
+            return {"action": "list_main", "theme_index": None, "confidence": 0.0}
+        action = str(route.get("action") or "list_main").strip().lower()
+        if action not in {"list_main", "list_subtopics"}:
+            action = "list_main"
+        idx = route.get("theme_index")
+        if not isinstance(idx, int):
+            idx = None
+        return {
+            "action": action,
+            "theme_index": idx,
+            "confidence": float(route.get("confidence") or 0.0),
+        }
+
+    @staticmethod
+    def _build_exact_context_from_document_start(
+        docs: list[Document],
+        max_total_chars: int = 80000,
+        per_doc_cap: int = 30000,
+    ) -> str:
+        """
+        Build context from the beginning of documents (format-agnostic strategy).
+        Same logic for PDF/DOCX/TXT/MD: use extracted plain text and take the start.
+        """
+        parts = []
+        total = 0
+
+        for doc in docs:
+            block = ""
+
+            try:
+                text = _load_document_text(doc) or ""
+                if text:
+                    block = f"[doc: {doc.original_name}]\n{text[:per_doc_cap]}"
+            except Exception:
+                block = ""
+
+            if not block:
+                continue
+            if total + len(block) > max_total_chars:
+                break
+            parts.append(block)
+            total += len(block)
+
+        return "\n\n---\n\n".join(parts)
+
+    @staticmethod
+    def _merge_outline_node_recursive(node: dict) -> dict | None:
+        """Recursive outline branch: supports 3+ levels (subtopics under subtopics)."""
+        title = PreplanChatView._clean_topic_text(node.get("title") or "")
+        if not title:
+            return None
+        subs_out = []
+        for sub in node.get("subtopics") or []:
+            if not isinstance(sub, dict):
+                continue
+            merged = PreplanChatView._merge_outline_node_recursive(sub)
+            if merged:
+                subs_out.append(merged)
+        return {
+            "title": title,
+            "page": node.get("page") if isinstance(node.get("page"), int) else None,
+            "subtopics": subs_out,
+        }
+
+    @staticmethod
+    def _all_descendant_topic_items(node: dict) -> list[dict]:
+        """DFS: all L2+ items with title/page for exact-mode reply."""
+        out: list[dict] = []
+        for sub in node.get("subtopics") or []:
+            if not isinstance(sub, dict):
+                continue
+            st = PreplanChatView._clean_topic_text(sub.get("title") or "")
+            if not st:
+                continue
+            pg = sub.get("page")
+            out.append(
+                {
+                    "title": st,
+                    "page": pg if isinstance(pg, int) else None,
+                }
+            )
+            out.extend(PreplanChatView._all_descendant_topic_items(sub))
+        return out
+
+    @staticmethod
+    def _build_combined_outline(docs: list[Document]) -> list[dict]:
+        combined = []
+        seen = set()
+        for doc in docs:
+            outline = doc.extracted_outline or []
+            if not isinstance(outline, list):
+                continue
+            for node in outline:
+                if not isinstance(node, dict):
+                    continue
+                title = PreplanChatView._clean_topic_text(node.get("title") or "")
+                if not title:
+                    continue
+                key = title.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged = PreplanChatView._merge_outline_node_recursive(node)
+                if merged:
+                    combined.append(merged)
+        return combined
+
+    @staticmethod
+    def _unwrap_toc_root_outline(outline: list[dict]) -> list[dict]:
+        """
+        If the outline is a single synthetic TOC node (e.g. «Оглавление»), expose its
+        children as the real top level so exact-mode lists match user expectations.
+        """
+        current = outline
+        guard = 0
+        while len(current) == 1 and guard < 8:
+            guard += 1
+            node = current[0]
+            if not isinstance(node, dict):
+                break
+            title = PreplanChatView._clean_topic_text(node.get("title") or "").strip().lower()
+            if title not in PreplanChatView._TOC_WRAPPER_TITLES:
+                break
+            subs = node.get("subtopics") or []
+            if not subs:
+                break
+            next_outline: list[dict] = []
+            for s in subs:
+                if not isinstance(s, dict):
+                    continue
+                merged = PreplanChatView._merge_outline_node_recursive(s)
+                if merged:
+                    next_outline.append(merged)
+            if not next_outline:
+                break
+            current = next_outline
+        return current
+
+    @staticmethod
+    def _outline_from_flat_extracted_topics(docs: list[Document]) -> list[dict]:
+        """When extracted_outline is empty but Celery already filled extracted_topics."""
+        combined: list[dict] = []
+        seen: set[str] = set()
+        for doc in docs:
+            topics = doc.extracted_topics or []
+            if not isinstance(topics, list):
+                continue
+            for t in topics:
+                title = PreplanChatView._clean_topic_text(str(t or ""))
+                if not title:
+                    continue
+                key = title.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                combined.append({"title": title, "page": None, "subtopics": []})
+        return combined
+
+    @staticmethod
+    def _topic_ref_from_message(message: str) -> int | None:
+        text = message or ""
+        m = re.search(
+            r"(?:тем[аыиюе]|topic)\s*(?:номер\s*)?(\d+)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not m:
+            # Also support short follow-ups like "подтемы у 3".
+            has_subtopic_intent = bool(
+                re.search(r"(?:подтем|subtopic|sub-topics?)", text, flags=re.IGNORECASE)
+            )
+            if has_subtopic_intent:
+                nums = re.findall(r"\b(\d+)\b", text)
+                if nums:
+                    try:
+                        # Prefer the last number: phrase usually ends with the chapter index.
+                        return int(nums[-1])
+                    except ValueError:
+                        return None
+            return None
+        try:
+            return int(m.group(1))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _strip_leading_section_prefix(title: str) -> str:
+        """TOC titles like '3 Linear regression' → 'Linear regression' for matching."""
+        t = PreplanChatView._clean_topic_text(title)
+        return re.sub(r"^\d+(?:\.\d+)*\s+", "", t).strip()
+
+    @staticmethod
+    def _topic_title_query_from_message(message: str) -> str | None:
+        """
+        Free-text theme name after 'подтемы у темы …' (no catalogue heuristics; substring match on outline).
+        """
+        text = (message or "").strip()
+        if not text:
+            return None
+        patterns = [
+            r"(?:какие\s+)?(?:подтемы?|subtopics?).{0,80}?(?:у|for)\s+(?:тем[аыиюе]|theme|topic)\s+(.+?)(?:\?|\.|$)",
+            r"(?:подтемы?|subtopics?).{0,40}?(?:у|for)\s+(?:тем[аыиюе]|theme|topic)\s+[\"«](.+?)[\"»]",
+        ]
+        for pat in patterns:
+            m = re.search(pat, text, flags=re.IGNORECASE | re.DOTALL)
+            if not m:
+                continue
+            q = m.group(1).strip().strip("\"'«»").rstrip("?.!")
+            if not q or re.match(r"^\d+$", q):
+                continue
+            return q
+        return None
+
+    @staticmethod
+    def _resolve_outline_node_by_title_fragment(
+        combined_outline: list[dict], fragment: str
+    ) -> dict | None:
+        frag = PreplanChatView._clean_topic_text(fragment).lower().replace("ё", "е")
+        if len(frag) < 3:
+            return None
+        best = None
+        best_score = 0
+        for node in combined_outline:
+            title = PreplanChatView._clean_topic_text(node.get("title") or "")
+            tl = title.lower().replace("ё", "е")
+            bare = PreplanChatView._strip_leading_section_prefix(title).lower().replace("ё", "е")
+            for cand in (tl, bare):
+                if not cand:
+                    continue
+                if frag in cand:
+                    score = len(frag)
+                elif cand in frag:
+                    score = len(cand)
+                else:
+                    continue
+                if score > best_score:
+                    best_score = score
+                    best = node
+        return best
+
     def post(self, request, *args, **kwargs):
         document_ids = request.data.get("document_ids") or []
         message = (request.data.get("message") or "").strip()
         history = request.data.get("history") or []
+        requested_mode = (request.data.get("mode") or "auto").strip().lower()
 
         if not isinstance(document_ids, list) or not document_ids:
             return Response(
@@ -878,6 +1370,34 @@ class PreplanChatView(APIView):
                 {"detail": "message is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if requested_mode not in {"semantic", "exact", "auto"}:
+            return Response(
+                {"detail": "mode must be 'semantic', 'exact' or 'auto'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            llm = LLMClient()
+        except Exception as exc:
+            return Response(
+                {"detail": f"AI is not configured: {str(exc)}"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        # Centralized routing via LLM for all client modes (auto/semantic/exact).
+        try:
+            mode, wants_full_subtopics_list = self._route_preplan_mode(
+                llm=llm,
+                message=message,
+                history=history,
+                requested_mode=requested_mode,
+            )
+        except Exception:
+            # Minimal safe fallback when router call fails.
+            if requested_mode in {"semantic", "exact"}:
+                mode = requested_mode
+            else:
+                mode = "exact" if self._history_has_exact_topics(history) else "semantic"
+            wants_full_subtopics_list = False
 
         docs = list(
             Document.objects.filter(id__in=document_ids, owner=request.user).order_by("id")
@@ -888,26 +1408,197 @@ class PreplanChatView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Ensure documents are indexed. If not indexed yet, index on-demand.
-        # (Upload-time indexing should cover most cases, but this is a safe fallback.)
-        try:
-            missing = [d for d in docs if not d.doc_chunks.exists()]
-            if missing:
-                index_documents(missing)
-        except Exception:
-            # If indexing fails, we'll still try to proceed (context may be empty).
-            pass
+        # Ensure documents are indexed asynchronously.
+        # If some documents are not ready yet, queue indexing and return progress state.
+        missing = [d for d in docs if d.index_status != Document.IndexStatus.READY or not d.doc_chunks.exists()]
+        if missing:
+            for d in missing:
+                if d.index_status != Document.IndexStatus.PROCESSING:
+                    d.index_status = Document.IndexStatus.PENDING
+                    d.index_error = ""
+                    d.save(update_fields=["index_status", "index_error"])
+                    index_document_task.delay(d.id)
+            return Response(
+                {
+                    "reply": "Идет обработка материалов. Попробуйте снова через несколько секунд.",
+                    "suggested_goals": "",
+                    "topics": [],
+                    "questions": [],
+                    "exact_topics": [],
+                    "truncated": False,
+                    "mode": mode,
+                    "processing": True,
+                    "documents_status": [
+                        {
+                            "id": d.id,
+                            "original_name": d.original_name,
+                            "index_status": d.index_status,
+                            "topics_status": d.topics_status,
+                        }
+                        for d in docs
+                    ],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if mode == "exact":
+            # Ensure topics extraction is running/completed in background.
+            not_ready_topics = []
+            for d in docs:
+                if d.topics_status == Document.TopicsStatus.IDLE:
+                    d.topics_status = Document.TopicsStatus.PROCESSING
+                    d.topics_error = ""
+                    d.save(update_fields=["topics_status", "topics_error"])
+                    extract_document_topics_task.delay(d.id)
+                    not_ready_topics.append(d)
+                elif d.topics_status == Document.TopicsStatus.PROCESSING:
+                    not_ready_topics.append(d)
+            if not_ready_topics:
+                return Response(
+                    {
+                        "reply": "Идет извлечение тем и подтем. Попробуйте снова через несколько секунд.",
+                        "suggested_goals": "",
+                        "topics": [],
+                        "questions": [],
+                        "exact_topics": [],
+                        "truncated": False,
+                        "mode": mode,
+                        "processing": True,
+                        "documents_status": [
+                            {
+                                "id": d.id,
+                                "original_name": d.original_name,
+                                "index_status": d.index_status,
+                                "topics_status": d.topics_status,
+                            }
+                            for d in docs
+                        ],
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            combined_outline = self._build_combined_outline(docs)
+            combined_outline = self._unwrap_toc_root_outline(combined_outline)
+            if not combined_outline:
+                combined_outline = self._outline_from_flat_extracted_topics(docs)
+            if combined_outline:
+                try:
+                    exact_route = self._route_exact_outline_action_with_llm(
+                        llm=llm,
+                        message=message,
+                        history=history,
+                        combined_outline=combined_outline,
+                    )
+                except Exception:
+                    exact_route = {"action": "list_main", "theme_index": None, "confidence": 0.0}
+
+                node = None
+                if exact_route.get("action") == "list_subtopics":
+                    idx = exact_route.get("theme_index")
+                    if isinstance(idx, int) and 1 <= idx <= len(combined_outline):
+                        node = combined_outline[idx - 1]
+
+                if node is not None:
+                    nested = PreplanChatView._all_descendant_topic_items(node)
+                    if nested:
+                        return Response(
+                            {
+                                "reply": f'Подтемы для темы "{node["title"]}":',
+                                "suggested_goals": "",
+                                "topics": [x["title"] for x in nested],
+                                "questions": [],
+                                "exact_topics": nested,
+                                "truncated": False,
+                                "mode": mode,
+                            },
+                            status=status.HTTP_200_OK,
+                        )
+                    return Response(
+                        {
+                            "reply": f'Для темы "{node["title"]}" подтемы не найдены в структуре материала.',
+                            "suggested_goals": "",
+                            "topics": [],
+                            "questions": [],
+                            "exact_topics": [],
+                            "truncated": False,
+                            "mode": mode,
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+                # If user just confirmed ("да/ok") after subtopics, ask for explicit next target
+                # instead of resetting to the top-level list.
+                if (
+                    exact_route.get("action") == "list_main"
+                    and self._history_has_recent_subtopics_reply(history)
+                    and str(message or "").strip().lower() in {"да", "ok", "okay", "yes", "ага", "угу"}
+                ):
+                    return Response(
+                        {
+                            "reply": (
+                                "Уточните, для какой темы показать подтемы дальше: "
+                                "напишите `подтемы у темы N` или `подтемы у темы <название>`."
+                            ),
+                            "suggested_goals": "",
+                            "topics": [n["title"] for n in combined_outline],
+                            "questions": [],
+                            "exact_topics": [{"title": n["title"], "page": n.get("page")} for n in combined_outline],
+                            "truncated": False,
+                            "mode": mode,
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+                # default exact response: main themes only
+                return Response(
+                    {
+                        "reply": (
+                            "Вот основные темы из материалов. "
+                            "Номер N — позиция в этом списке сверху вниз (не обязательно номер главы в книге). "
+                            "Пример: «подтемы у темы 5» или «подтемы у темы линейная регрессия»."
+                        ),
+                        "suggested_goals": "",
+                        "topics": [n["title"] for n in combined_outline],
+                        "questions": [],
+                        "exact_topics": [{"title": n["title"], "page": n.get("page")} for n in combined_outline],
+                        "truncated": False,
+                        "mode": mode,
+                    },
+                    status=status.HTTP_200_OK,
+                )
 
         rag = DocumentRAGService()
         try:
-            context = rag.build_context(docs, query=message, top_k=30, max_total_chars=16000)
+            if mode == "exact":
+                # Prefer deterministic "start of book" extraction for TOC-like requests.
+                context = self._build_exact_context_from_document_start(
+                    docs,
+                    max_total_chars=80000 if wants_full_subtopics_list else 22000,
+                    per_doc_cap=30000 if wants_full_subtopics_list else 9000,
+                )
+                # Fallback to vector RAG only if start-of-document extraction is empty.
+                if not context:
+                    context = rag.build_context(
+                        docs,
+                        query=message,
+                        top_k=100 if wants_full_subtopics_list else 35,
+                        max_total_chars=80000 if wants_full_subtopics_list else 18000,
+                    )
+            else:
+                context = rag.build_context(docs, query=message, top_k=30, max_total_chars=16000)
         except Exception:
             # Fallback until migrations/embeddings are fully available.
             # Keeps pre-plan flow working even if doc-level vector chunks are not ready.
             parts = []
             total = 0
-            per_doc_cap = 4000
-            max_total_chars = 16000
+            if mode == "exact":
+                if wants_full_subtopics_list:
+                    per_doc_cap = 20000
+                    max_total_chars = 80000
+                else:
+                    per_doc_cap = 4500
+                    max_total_chars = 18000
+            else:
+                per_doc_cap = 4000
+                max_total_chars = 16000
             for doc in docs:
                 try:
                     text = _load_document_text(doc) or ""
@@ -928,23 +1619,57 @@ class PreplanChatView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        system_prompt = (
-            "You are an expert instructional designer and tutor.\n"
-            "You will receive excerpts from the user's selected study documents.\n"
-            "Your job is to help the user clarify what they want to learn and produce a high-quality 'learning goals' text.\n\n"
-            "Rules:\n"
-            "- First, list the main topics you can confidently identify from the materials.\n"
-            "- Then ask 3-7 clarifying questions to refine scope, level, and priorities.\n"
-            "- Then propose 'suggested_goals' as a concise paragraph (or bullet list) the user can paste into the plan form.\n"
-            "- If the user asks something outside the provided materials, say it and propose how to proceed.\n"
-            "- Reply in the same language as the user.\n\n"
-            "Return ONLY valid JSON with keys:\n"
-            "- reply: string (your full answer in markdown)\n"
-            "- suggested_goals: string (clean text the user can paste)\n"
-            "- topics: array of strings\n"
-            "- questions: array of strings\n\n"
-            f"Materials excerpts (retrieved):\n{context}\n"
-        )
+        if mode == "exact":
+            if wants_full_subtopics_list:
+                exact_scope_rules = (
+                    "- Return full subtopics list for requested theme/section.\n"
+                    "- Do NOT shorten the list for brevity.\n"
+                )
+            else:
+                exact_scope_rules = (
+                    "- Return ONLY top-level themes/sections (main headings).\n"
+                    "- Do NOT include subtopics/items at this stage.\n"
+                    "- In 'reply', ask user if they want subtopics and for which exact theme number/title.\n"
+                )
+            system_prompt = (
+                "You are a precise document analyst.\n"
+                "You will receive excerpts from selected study materials.\n"
+                "Extract topics EXACTLY as they appear in the materials (section/chapter names, headings, explicit topic phrases).\n\n"
+                "Rules:\n"
+                "- Do NOT paraphrase topic names.\n"
+                "- Do NOT invent topics that are not explicitly present.\n"
+                f"{exact_scope_rules}"
+                "- Keep the response concise.\n"
+                "- If a topic is uncertain, skip it.\n"
+                "- If page numbers are not available in context, set page to null.\n"
+                "- Reply in the same language as the user.\n\n"
+                "Return ONLY valid JSON with keys:\n"
+                "- reply: string (short plain-text answer, no markdown)\n"
+                "- suggested_goals: string (can be empty string)\n"
+                "- topics: array of strings (exact topic names from source)\n"
+                "- questions: array of strings (keep empty array)\n"
+                "- truncated: boolean (true if output had to be shortened)\n"
+                "- exact_topics: array of objects with keys: title (string), page (number|null)\n\n"
+                f"Materials excerpts (retrieved):\n{context}\n"
+            )
+        else:
+            system_prompt = (
+                "You are an expert instructional designer and tutor.\n"
+                "You will receive excerpts from the user's selected study documents.\n"
+                "Your job is to help the user clarify what they want to learn and produce a high-quality 'learning goals' text.\n\n"
+                "Rules:\n"
+                "- First, list the main topics you can confidently identify from the materials.\n"
+                "- Then ask 3-7 clarifying questions to refine scope, level, and priorities.\n"
+                "- Then propose 'suggested_goals' as a concise paragraph (or bullet list) the user can paste into the plan form.\n"
+                "- If the user asks something outside the provided materials, say it and propose how to proceed.\n"
+                "- Reply in the same language as the user.\n\n"
+                "Return ONLY valid JSON with keys:\n"
+                "- reply: string (your full answer as plain text, no markdown)\n"
+                "- suggested_goals: string (clean text the user can paste)\n"
+                "- topics: array of strings\n"
+                "- questions: array of strings\n\n"
+                f"Materials excerpts (retrieved):\n{context}\n"
+            )
 
         # Convert chat history to OpenAI format
         messages = [{"role": "system", "content": system_prompt}]
@@ -955,14 +1680,7 @@ class PreplanChatView(APIView):
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": message})
 
-        try:
-            llm = LLMClient()
-        except Exception as exc:
-            # LLM client not configured (missing key/package etc.)
-            return Response(
-                {"detail": f"AI is not configured: {str(exc)}"},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        # llm already initialized above (used by router and generation).
 
         try:
             # Prefer JSON response format when supported
@@ -971,22 +1689,60 @@ class PreplanChatView(APIView):
                 messages=messages,
                 response_format={"type": "json_object"},
                 temperature=0.3,
-                max_tokens=1200,
+                max_tokens=2600 if (mode == "exact" and wants_full_subtopics_list) else (1300 if mode == "exact" else 1200),
             )
             content = resp.choices[0].message.content or "{}"
-            import json
-
-            data = json.loads(content)
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                # Some providers occasionally return malformed JSON despite json_object mode.
+                repair_system = (
+                    "You repair malformed JSON. "
+                    "Return ONLY valid JSON object, no markdown/comments."
+                )
+                repair_user = (
+                    "Repair this malformed JSON while preserving meaning and keys when possible:\n\n"
+                    f"{content}"
+                )
+                data = llm.complete_json(repair_system, repair_user)
+            if not isinstance(data, dict):
+                raise ValueError("LLM returned non-object JSON.")
+            exact_topics = self._normalize_exact_topics(data.get("exact_topics") or [])
+            if mode == "exact" and not exact_topics:
+                exact_topics = self._normalize_exact_topics(self._build_exact_topics_fallback(data))
+            if mode == "exact":
+                Document.objects.filter(id__in=[d.id for d in docs]).update(
+                    topics_status=Document.TopicsStatus.READY,
+                    topics_error="",
+                )
+            raw_topics = data.get("topics") or []
+            if isinstance(raw_topics, list):
+                topics_plain = [strip_light_markdown_for_ui(str(t)) for t in raw_topics]
+            else:
+                topics_plain = []
+            raw_qs = data.get("questions") or []
+            if isinstance(raw_qs, list):
+                questions_plain = [strip_light_markdown_for_ui(str(t)) for t in raw_qs]
+            else:
+                questions_plain = []
             return Response(
                 {
-                    "reply": data.get("reply") or "",
-                    "suggested_goals": data.get("suggested_goals") or "",
-                    "topics": data.get("topics") or [],
-                    "questions": data.get("questions") or [],
+                    "reply": strip_light_markdown_for_ui(str(data.get("reply") or "")),
+                    "suggested_goals": strip_light_markdown_for_ui(str(data.get("suggested_goals") or "")),
+                    "topics": topics_plain,
+                    "questions": questions_plain,
+                    "exact_topics": exact_topics,
+                    "truncated": bool(data.get("truncated", False)),
+                    "mode": mode,
                 },
                 status=status.HTTP_200_OK,
             )
         except Exception as exc:
+            if mode == "exact":
+                Document.objects.filter(id__in=[d.id for d in docs]).update(
+                    topics_status=Document.TopicsStatus.FAILED,
+                    topics_error=str(exc)[:2000],
+                )
             return Response(
                 {"detail": f"AI error: {str(exc)}"},
                 status=status.HTTP_502_BAD_GATEWAY,

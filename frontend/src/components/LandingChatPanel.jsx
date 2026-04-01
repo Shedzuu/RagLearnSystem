@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { plansApi } from '../api/client'
+import { stripLightMarkdown } from '../utils/plainChatText'
 import styles from './LandingChatPanel.module.css'
 
 const QUICK_QA = {
@@ -117,7 +118,7 @@ export default function LandingChatPanel({ isOpen, onClose }) {
               key={i}
               className={msg.role === 'user' ? styles.msgUser : styles.msgAssistant}
             >
-              <div className={styles.msgContent}>{msg.content}</div>
+              <div className={styles.msgContent}>{stripLightMarkdown(msg.content)}</div>
             </div>
           ))}
           {loading && (

@@ -24,7 +24,33 @@
 .title {
   font-size: 28px;
   font-weight: 700;
+  margin: 0;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 24px;
+}
+
+.uploadBtn {
+  border-radius: 999px;
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: #fff;
+  padding: 0.5rem 0.95rem;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.uploadBtn:hover {
+  background: #1d4ed8;
+}
+
+.hiddenInput {
+  display: none;
 }
 
 .error {
@@ -62,6 +88,15 @@
 
 .name {
   flex: 1;
+}
+
+.status {
+  font-size: 0.78rem;
+  color: #374151;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
 }
 
 .size {

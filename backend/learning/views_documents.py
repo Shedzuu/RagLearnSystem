@@ -1,9 +1,14 @@
+from pathlib import Path
+
+from django.conf import settings
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Document, Plan
 from .serializers import DocumentSerializer
+from .tasks import index_document_task, extract_document_topics_task
 
 
 class DocumentListView(generics.ListAPIView):
@@ -13,7 +18,30 @@ class DocumentListView(generics.ListAPIView):
     serializer_class = DocumentSerializer
 
     def get_queryset(self):
-        return Document.objects.filter(owner=self.request.user).order_by("-uploaded_at")
+        qs = Document.objects.filter(owner=self.request.user).order_by("-uploaded_at")
+        # Self-heal: if documents are stuck in pending, enqueue indexing task again.
+        for doc in qs:
+            if doc.index_status == Document.IndexStatus.PENDING:
+                if not doc.doc_chunks.exists():
+                    doc.index_status = Document.IndexStatus.PROCESSING
+                    doc.index_error = ""
+                    doc.save(update_fields=["index_status", "index_error"])
+                    index_document_task.delay(doc.id)
+                else:
+                    # If chunks already exist, mark as ready.
+                    doc.index_status = Document.IndexStatus.READY
+                    doc.index_error = ""
+                    doc.save(update_fields=["index_status", "index_error"])
+            # Backfill for previously indexed docs: start topics extraction if not started yet.
+            if (
+                doc.index_status == Document.IndexStatus.READY
+                and doc.topics_status == Document.TopicsStatus.IDLE
+            ):
+                doc.topics_status = Document.TopicsStatus.PROCESSING
+                doc.topics_error = ""
+                doc.save(update_fields=["topics_status", "topics_error"])
+                extract_document_topics_task.delay(doc.id)
+        return qs
 
 
 class AttachDocumentsToPlanView(APIView):
@@ -64,5 +92,33 @@ class AttachDocumentsToPlanView(APIView):
 
         serialized = DocumentSerializer(docs, many=True)
         return Response(serialized.data, status=status.HTTP_200_OK)
+
+
+class PlanDocumentDeleteView(APIView):
+    """Remove a document from a plan: delete file, DB row, chunks and topic fields (CASCADE)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, plan_id, document_id, *args, **kwargs):
+        plan = get_object_or_404(Plan, id=plan_id, owner=request.user)
+        doc = get_object_or_404(
+            Document,
+            id=document_id,
+            plan=plan,
+            owner=request.user,
+        )
+        base = Path(settings.BASE_DIR).resolve()
+        rel = Path(doc.file_path)
+        if not rel.is_absolute():
+            target = (base / rel).resolve()
+        else:
+            target = rel.resolve()
+        try:
+            if target.is_file() and (base == target or base in target.parents):
+                target.unlink()
+        except OSError:
+            pass
+        doc.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 

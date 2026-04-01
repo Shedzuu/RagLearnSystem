@@ -171,13 +171,14 @@ export const plansApi = {
     })
   },
 
-  async sendPreplanChat({ documentIds, message, history }) {
+  async sendPreplanChat({ documentIds, message, history, mode = 'semantic' }) {
     return request('/ai/preplan-chat/', {
       method: 'POST',
       body: JSON.stringify({
         document_ids: documentIds || [],
         message,
         history: history || [],
+        mode,
       }),
     })
   },
@@ -212,6 +213,12 @@ export const plansApi = {
     return request(`/plans/${planId}/attach-documents/`, {
       method: 'POST',
       body: JSON.stringify({ document_ids: documentIds }),
+    })
+  },
+
+  async deletePlanDocument(planId, documentId) {
+    return request(`/plans/${planId}/documents/${documentId}/`, {
+      method: 'DELETE',
     })
   },
 

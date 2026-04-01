@@ -31,6 +31,18 @@ class Plan(models.Model):
 
 
 class Document(models.Model):
+    class IndexStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+
+    class TopicsStatus(models.TextChoices):
+        IDLE = "idle", "Idle"
+        PROCESSING = "processing", "Processing"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+
     owner = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -48,6 +60,20 @@ class Document(models.Model):
     file_path = models.CharField(max_length=500)
     original_name = models.CharField(max_length=255)
     file_size = models.IntegerField()
+    index_status = models.CharField(
+        max_length=20,
+        choices=IndexStatus.choices,
+        default=IndexStatus.PENDING,
+    )
+    topics_status = models.CharField(
+        max_length=20,
+        choices=TopicsStatus.choices,
+        default=TopicsStatus.IDLE,
+    )
+    extracted_topics = models.JSONField(default=list, blank=True)
+    extracted_outline = models.JSONField(default=list, blank=True)
+    index_error = models.TextField(blank=True)
+    topics_error = models.TextField(blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:

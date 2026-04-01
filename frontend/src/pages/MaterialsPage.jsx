@@ -11,6 +11,7 @@ export default function MaterialsPage() {
   const [materials, setMaterials] = useState([])
   const [selectedIds, setSelectedIds] = useState([])
   const [loadingList, setLoadingList] = useState(true)
+  const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -33,10 +34,28 @@ export default function MaterialsPage() {
       }
     }
     load()
+    const interval = setInterval(load, 5000)
     return () => {
       cancelled = true
+      clearInterval(interval)
     }
   }, [user])
+
+  const statusLabel = (m) => {
+    const indexMap = {
+      pending: 'Reading: queued',
+      processing: 'Reading: in progress',
+      ready: 'Reading: done',
+      failed: 'Reading: failed',
+    }
+    const topicsMap = {
+      idle: 'Topics: not started',
+      processing: 'Topics: in progress',
+      ready: 'Topics: done',
+      failed: 'Topics: failed',
+    }
+    return `${indexMap[m.index_status] || 'Reading: unknown'} · ${topicsMap[m.topics_status] || 'Topics: unknown'}`
+  }
 
   const toggleSelected = (id) => {
     setSelectedIds((prev) =>
@@ -49,6 +68,23 @@ export default function MaterialsPage() {
     navigate('/create-plan', { state: { selectedDocumentIds: selectedIds } })
   }
 
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file || uploading) return
+    setUploading(true)
+    setError('')
+    try {
+      await documentsApi.uploadDocument(file)
+      const data = await documentsApi.listDocuments()
+      setMaterials(data)
+    } catch (_) {
+      setError('Failed to upload material')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
   if (loading || !user) return null
 
   return (
@@ -56,7 +92,18 @@ export default function MaterialsPage() {
       <AppHeader />
       <main className={styles.main}>
         <div className={styles.card}>
-          <h1 className={styles.title}>My materials</h1>
+          <div className={styles.headerRow}>
+            <h1 className={styles.title}>My materials</h1>
+            <label className={styles.uploadBtn}>
+              {uploading ? 'Uploading...' : 'Upload file'}
+              <input
+                type="file"
+                className={styles.hiddenInput}
+                onChange={handleUpload}
+                disabled={uploading}
+              />
+            </label>
+          </div>
           {error && <p className={styles.error}>{error}</p>}
           {loadingList ? (
             <p className={styles.muted}>Loading materials...</p>
@@ -74,6 +121,7 @@ export default function MaterialsPage() {
                         onChange={() => toggleSelected(m.id)}
                       />
                       <span className={styles.name}>{m.original_name}</span>
+                      <span className={styles.status}>{statusLabel(m)}</span>
                       <span className={styles.size}>
                         {(m.file_size / (1024 * 1024)).toFixed(2)} MB
                       </span>

@@ -1,4 +1,9 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
   db:
     image: pgvector/pgvector:pg15
     environment:
@@ -36,9 +41,39 @@ services:
       - DB_HOST=db
       - DB_PORT=5432
       - CORS_ALLOWED_ORIGINS=http://localhost:5173
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build: ./backend
+    command: celery -A config worker -l info
+    volumes:
+      - ./backend:/app
+      - hf_cache:/root/.cache/huggingface
+    env_file:
+      - .env
+    environment:
+      - SECRET_KEY=dev-secret-key
+      - DEBUG=1
+      - ALLOWED_HOSTS=localhost,127.0.0.1,backend
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=diploma
+      - DB_USER=diploma
+      - DB_PASSWORD=diploma
+      - DB_HOST=db
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
   frontend:
     build: ./frontend

@@ -4,6 +4,7 @@ import AppHeader from '../components/AppHeader'
 import AIChatPanel from '../components/AIChatPanel'
 import { useAuth } from '../context/AuthContext'
 import { plansApi } from '../api/client'
+import { stripLightMarkdown } from '../utils/plainChatText'
 import styles from './UnitPage.module.css'
 
 export default function UnitPage() {
@@ -309,10 +310,10 @@ export default function UnitPage() {
             <p className={styles.error}>Unit not found.</p>
           ) : (
             <>
-              <h1 className={styles.title}>{unit.title}</h1>
+              <h1 className={styles.title}>{stripLightMarkdown(unit.title)}</h1>
               <section className={styles.theory}>
                 <h2 className={styles.sectionTitle}>Theory</h2>
-                <p className={styles.theoryText}>{unit.theory}</p>
+                <p className={styles.theoryText}>{stripLightMarkdown(unit.theory)}</p>
               </section>
               {unit.questions.length > 0 && (
                 <section className={styles.questions}>
@@ -323,12 +324,14 @@ export default function UnitPage() {
                       return (
                         <li key={q.id} className={styles.questionItem}>
                           <div className={styles.questionHeader}>
-                            <p className={styles.questionText}>{q.text}</p>
+                            <p className={styles.questionText}>{stripLightMarkdown(q.text)}</p>
                             <button
                               type="button"
                               className={styles.aiHelpBtn}
                               title="Ask AI for help with this question"
-                              onClick={() => setAiQuestionContext({ id: q.id, text: q.text })}
+                              onClick={() =>
+                                setAiQuestionContext({ id: q.id, text: stripLightMarkdown(q.text) })
+                              }
                             >
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/>
@@ -349,7 +352,7 @@ export default function UnitPage() {
                                         checked={selected}
                                         onChange={() => toggleChoice(q, ch.id)}
                                       />
-                                      <span>{ch.text}</span>
+                                      <span>{stripLightMarkdown(ch.text)}</span>
                                     </label>
                                   </li>
                                 )

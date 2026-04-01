@@ -15,6 +15,8 @@ export default function PlanDetailPage() {
   const [loadingPlan, setLoadingPlan] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState('')
+  const [deletingDocId, setDeletingDocId] = useState(null)
+  const [docDeleteError, setDocDeleteError] = useState('')
 
   useEffect(() => {
     if (!loading && !user) navigate('/login')
@@ -46,6 +48,28 @@ export default function PlanDetailPage() {
       cancelled = true
     }
   }, [id, user])
+
+  const handleDeleteDocument = async (documentId) => {
+    if (!id || !documentId) return
+    if (!window.confirm('Delete this material from the plan? The file, embeddings and extracted topics will be removed from the database.')) {
+      return
+    }
+    setDocDeleteError('')
+    setDeletingDocId(documentId)
+    try {
+      await plansApi.deletePlanDocument(id, documentId)
+      const [data, progress] = await Promise.all([
+        plansApi.getPlan(id),
+        plansApi.getPlanProgress(id).catch(() => null),
+      ])
+      setPlan(data)
+      setPlanProgress(progress)
+    } catch (e) {
+      setDocDeleteError(e.body?.detail || e.message || 'Failed to delete material')
+    } finally {
+      setDeletingDocId(null)
+    }
+  }
 
   const handleGenerate = async () => {
     setGenerateError('')
@@ -146,6 +170,33 @@ export default function PlanDetailPage() {
           )}
           {generateError && (
             <p className={styles.error}>{generateError}</p>
+          )}
+          {plan?.documents?.length > 0 && (
+            <div className={styles.materialsBlock}>
+              <h2 className={styles.materialsTitle}>Materials</h2>
+              <p className={styles.muted}>
+                Removing a file deletes it from storage and drops all vector chunks and topic data for this document.
+              </p>
+              {docDeleteError && <p className={styles.error}>{docDeleteError}</p>}
+              <ul className={styles.materialsList}>
+                {plan.documents.map((d) => (
+                  <li key={d.id} className={styles.materialRow}>
+                    <span className={styles.materialName}>{d.original_name}</span>
+                    <button
+                      type="button"
+                      className={styles.btnDanger}
+                      disabled={deletingDocId === d.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDeleteDocument(d.id)
+                      }}
+                    >
+                      {deletingDocId === d.id ? 'Deleting…' : 'Remove'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       </main>
