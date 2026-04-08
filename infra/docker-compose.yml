@@ -2,6 +2,12 @@ name: test
 version: "3.9"
 
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
   db:
     image: pgvector/pgvector:pg15
     environment:
@@ -48,9 +54,50 @@ services:
       LLM_API_KEY: ${PROD_LLM_API_KEY}
       LLM_BASE_URL: ${PROD_LLM_BASE_URL}
       LLM_MODEL: ${PROD_LLM_MODEL}
+      # Async generation
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      GENERATE_PLAN_SYNC: "0"
 
     depends_on:
       - db
+      - redis
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    command: celery -A config worker -l info
+    restart: unless-stopped
+    volumes:
+      - ../backend:/app
+      - backend_media:/app/media
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      # Django
+      SECRET_KEY: ${PROD_JWT_SECRET_KEY}
+      DEBUG: "0"
+      ALLOWED_HOSTS: "localhost,127.0.0.1,backend,${DEPLOY_HOST}"
+
+      # Database
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${PROD_POSTGRES_DB}
+      DB_USER: ${PROD_POSTGRES_USER}
+      DB_PASSWORD: ${PROD_POSTGRES_PASSWORD}
+      DB_HOST: db
+      DB_PORT: 5432
+
+      # LLM (OpenRouter)
+      LLM_API_KEY: ${PROD_LLM_API_KEY}
+      LLM_BASE_URL: ${PROD_LLM_BASE_URL}
+      LLM_MODEL: ${PROD_LLM_MODEL}
+
+      # Async generation
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
 
   frontend:
     build:
