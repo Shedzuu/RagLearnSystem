@@ -5,6 +5,7 @@ from .views_documents import (
     DocumentListView,
     AttachDocumentsToPlanView,
     PlanDocumentDeleteView,
+    DocumentDeleteView,
 )
 from .views_upload_free import FreeDocumentUploadView
 from .views_generation import PlanGenerateView
@@ -35,6 +36,7 @@ urlpatterns = [
     ),
     path("documents/", DocumentListView.as_view(), name="document-list"),
     path("documents/upload/", FreeDocumentUploadView.as_view(), name="document-upload"),
+    path("documents/<int:document_id>/", DocumentDeleteView.as_view(), name="document-delete"),
     path("units/<int:pk>/", views.UnitDetailView.as_view(), name="unit-detail"),
     path("units/<int:unit_id>/state/", views.UnitStateView.as_view(), name="unit-state"),
     path("attempts/start/", views.StartAttemptView.as_view(), name="attempt-start"),

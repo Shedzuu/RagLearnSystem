@@ -122,3 +122,29 @@ class PlanDocumentDeleteView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class DocumentDeleteView(APIView):
+    """Delete a user's document from the materials library."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, document_id, *args, **kwargs):
+        doc = get_object_or_404(
+            Document,
+            id=document_id,
+            owner=request.user,
+        )
+        base = Path(settings.BASE_DIR).resolve()
+        rel = Path(doc.file_path)
+        if not rel.is_absolute():
+            target = (base / rel).resolve()
+        else:
+            target = rel.resolve()
+        try:
+            if target.is_file() and (base == target or base in target.parents):
+                target.unlink()
+        except OSError:
+            pass
+        doc.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+

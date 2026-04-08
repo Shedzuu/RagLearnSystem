@@ -235,6 +235,12 @@ export const documentsApi = {
     return request('/documents/')
   },
 
+  async deleteDocument(documentId) {
+    return request(`/documents/${documentId}/`, {
+      method: 'DELETE',
+    })
+  },
+
   async uploadDocument(file) {
     const formData = new FormData()
     formData.append('file', file)

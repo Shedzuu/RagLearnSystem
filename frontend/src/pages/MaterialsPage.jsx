@@ -12,6 +12,7 @@ export default function MaterialsPage() {
   const [selectedIds, setSelectedIds] = useState([])
   const [loadingList, setLoadingList] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -85,6 +86,25 @@ export default function MaterialsPage() {
     }
   }
 
+  const handleDelete = async (documentId) => {
+    if (!documentId || deletingId) return
+    if (!window.confirm('Delete this material? This removes the file, chunks and extracted topics.')) {
+      return
+    }
+    setError('')
+    setDeletingId(documentId)
+    try {
+      await documentsApi.deleteDocument(documentId)
+      setSelectedIds((prev) => prev.filter((id) => id !== documentId))
+      const data = await documentsApi.listDocuments()
+      setMaterials(data)
+    } catch (_) {
+      setError('Failed to delete material')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   if (loading || !user) return null
 
   return (
@@ -114,7 +134,7 @@ export default function MaterialsPage() {
               <ul className={styles.list}>
                 {materials.map((m) => (
                   <li key={m.id} className={styles.item}>
-                    <label className={styles.row}>
+                    <div className={styles.row}>
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(m.id)}
@@ -125,7 +145,15 @@ export default function MaterialsPage() {
                       <span className={styles.size}>
                         {(m.file_size / (1024 * 1024)).toFixed(2)} MB
                       </span>
-                    </label>
+                      <button
+                        type="button"
+                        className={styles.deleteBtn}
+                        disabled={deletingId === m.id}
+                        onClick={() => handleDelete(m.id)}
+                      >
+                        {deletingId === m.id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
