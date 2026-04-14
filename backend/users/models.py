@@ -11,6 +11,7 @@ class User(AbstractUser):
         YEARLY = 'yearly', 'Yearly'
 
     email = models.EmailField('email address', unique=True)
+    google_subject = models.CharField(max_length=255, unique=True, null=True, blank=True)
     subscription_plan = models.CharField(
         max_length=20,
         choices=SubscriptionPlan.choices,

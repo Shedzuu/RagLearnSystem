@@ -60,6 +60,12 @@ export function AuthProvider({ children }) {
     setUser(mapUser(data))
   }
 
+  const loginWithGoogle = async (credential) => {
+    await authApi.loginWithGoogle(credential)
+    const data = await authApi.getMe()
+    setUser(mapUser(data))
+  }
+
   const register = async (data) => {
     await authApi.register(data)
     await authApi.login(data.email, data.password)
@@ -80,7 +86,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, updateSubscription }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithGoogle, register, logout, updateSubscription }}>
       {children}
     </AuthContext.Provider>
   )

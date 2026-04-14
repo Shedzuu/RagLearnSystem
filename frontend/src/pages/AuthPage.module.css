@@ -172,25 +172,14 @@
   color: var(--text-muted);
 }
 
-.googleBtn {
-  display: inline-flex;
-  align-items: center;
+.googleButtonMount {
+  display: flex;
   justify-content: center;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: var(--card-border);
-  cursor: pointer;
+  min-height: 44px;
 }
 
-.googleBtn:hover {
-  opacity: 0.85;
-}
-
-.googleIcon {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
+.googleHint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }

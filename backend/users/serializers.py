@@ -77,6 +77,10 @@ class RegisterSerializer(serializers.ModelSerializer):
         return user
 
 
+class GoogleAuthSerializer(serializers.Serializer):
+    credential = serializers.CharField()
+
+
 class SubscriptionUpdateSerializer(serializers.Serializer):
     plan = serializers.ChoiceField(choices=User.SubscriptionPlan.choices)
     auto_renew = serializers.BooleanField(required=False)

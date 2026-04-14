@@ -67,6 +67,16 @@ export const authApi = {
     })
   },
 
+  async loginWithGoogle(credential) {
+    const data = await request('/auth/google/', {
+      method: 'POST',
+      body: JSON.stringify({ credential }),
+      skipAuth: true,
+    })
+    setTokens(data.access, data.refresh)
+    return data
+  },
+
   async getMe() {
     const data = await request('/auth/me/')
     return data

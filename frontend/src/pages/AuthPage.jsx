@@ -1,16 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import ThemeToggle from '../components/ThemeToggle'
 import styles from './AuthPage.module.css'
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
+const GOOGLE_SCRIPT_SRC = 'https://accounts.google.com/gsi/client'
+
 export default function AuthPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { login, register } = useAuth()
+  const { login, loginWithGoogle, register } = useAuth()
   const [mode, setMode] = useState('signin')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [googleReady, setGoogleReady] = useState(false)
   const [signIn, setSignIn] = useState({ email: '', password: '' })
   const [signUp, setSignUp] = useState({
     firstName: '',
@@ -19,6 +23,7 @@ export default function AuthPage() {
     password: '',
     confirmPassword: '',
   })
+  const googleButtonRef = useRef(null)
 
   const switchToSignUp = () => { setMode('signup'); setError('') }
   const switchToSignIn = () => { setMode('signin'); setError('') }
@@ -27,6 +32,66 @@ export default function AuthPage() {
     if (location.state?.fromUpload) navigate('/create-plan')
     else navigate('/')
   }
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return undefined
+
+    const existingScript = document.querySelector(`script[src="${GOOGLE_SCRIPT_SRC}"]`)
+    const handleLoad = () => setGoogleReady(true)
+
+    if (window.google?.accounts?.id) {
+      setGoogleReady(true)
+      return undefined
+    }
+
+    if (existingScript) {
+      existingScript.addEventListener('load', handleLoad)
+      return () => existingScript.removeEventListener('load', handleLoad)
+    }
+
+    const script = document.createElement('script')
+    script.src = GOOGLE_SCRIPT_SRC
+    script.async = true
+    script.defer = true
+    script.addEventListener('load', handleLoad)
+    document.body.appendChild(script)
+
+    return () => script.removeEventListener('load', handleLoad)
+  }, [])
+
+  useEffect(() => {
+    if (!googleReady || !GOOGLE_CLIENT_ID || !googleButtonRef.current || !window.google?.accounts?.id) return
+
+    window.google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: async (response) => {
+        if (!response.credential) {
+          setError('Google did not return a login token')
+          return
+        }
+
+        setError('')
+        setSubmitting(true)
+        try {
+          await loginWithGoogle(response.credential)
+          redirectAfterLogin()
+        } catch (err) {
+          setError(err.body?.detail || err.message || 'Google login failed')
+        } finally {
+          setSubmitting(false)
+        }
+      },
+    })
+
+    googleButtonRef.current.innerHTML = ''
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: 'outline',
+      size: 'large',
+      shape: 'pill',
+      text: 'continue_with',
+      width: 320,
+    })
+  }, [googleReady, loginWithGoogle])
 
   const handleSignInSubmit = async (e) => {
     e.preventDefault()
@@ -65,10 +130,6 @@ export default function AuthPage() {
     } finally {
       setSubmitting(false)
     }
-  }
-
-  const handleGoogle = () => {
-    setError('Google login is not connected to the backend yet')
   }
 
   return (
@@ -185,9 +246,17 @@ export default function AuthPage() {
 
         <div className={styles.social}>
           <p className={styles.socialLabel}>Or continue with</p>
-          <button type="button" className={styles.googleBtn} onClick={handleGoogle}>
-            <img src="/assets/google_logo.png" alt="Google" className={styles.googleIcon} />
-          </button>
+          {GOOGLE_CLIENT_ID ? (
+            <div
+              ref={googleButtonRef}
+              className={styles.googleButtonMount}
+              aria-busy={submitting ? 'true' : 'false'}
+            />
+          ) : (
+            <p className={styles.googleHint}>
+              Add <code>VITE_GOOGLE_CLIENT_ID</code> and <code>GOOGLE_OAUTH_CLIENT_ID</code> to enable Google sign-in.
+            </p>
+          )}
         </div>
       </div>
       </div>
