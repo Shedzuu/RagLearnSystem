@@ -32,12 +32,20 @@ jobs:
             export PROD_POSTGRES_USER='${{ secrets.PROD_POSTGRES_USER }}'
             export PROD_POSTGRES_PASSWORD='${{ secrets.PROD_POSTGRES_PASSWORD }}'
             export PROD_JWT_SECRET_KEY='${{ secrets.PROD_JWT_SECRET_KEY }}'
+            export PROD_GOOGLE_OAUTH_CLIENT_ID='${{ secrets.PROD_GOOGLE_OAUTH_CLIENT_ID }}'
             export PROD_LLM_API_KEY='${{ secrets.PROD_LLM_API_KEY }}'
             export PROD_LLM_BASE_URL='${{ secrets.PROD_LLM_BASE_URL }}'
             export PROD_LLM_MODEL='${{ secrets.PROD_LLM_MODEL }}'
             export DEPLOY_HOST='${{ secrets.DEPLOY_HOST }}'
             cd ~/test/infra
-            docker compose -p test -f docker-compose.yml pull
-            docker compose -p test -f docker-compose.yml up -d --build
+            for attempt in 1 2 3; do
+              if docker compose -p test -f docker-compose.yml up -d --build; then
+                exit 0
+              fi
+              echo "Docker Compose deploy failed on attempt \$attempt, retrying in 15 seconds..."
+              sleep 15
+            done
+            echo "Docker Compose deploy failed after 3 attempts."
+            exit 1
           EOF
 
