@@ -2,13 +2,13 @@ name: test
 
 services:
   redis:
-    image: redis:7-alpine
+    image: ghcr.io/${GHCR_OWNER}/raglearn-redis:${APP_IMAGE_TAG}
     restart: unless-stopped
     ports:
       - "6379:6379"
 
   db:
-    image: pgvector/pgvector:pg15
+    image: ghcr.io/${GHCR_OWNER}/raglearn-pgvector:${APP_IMAGE_TAG}
     environment:
       POSTGRES_DB: ${PROD_POSTGRES_DB}
       POSTGRES_USER: ${PROD_POSTGRES_USER}

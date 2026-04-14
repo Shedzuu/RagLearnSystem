@@ -29,11 +29,17 @@ jobs:
 
       - name: Build deployment images on GitHub runner
         run: |
+          docker pull redis:7-alpine
+          docker pull pgvector/pgvector:pg15
+          docker tag redis:7-alpine ghcr.io/${{ secrets.GHCR_USERNAME }}/raglearn-redis:${{ github.sha }}
+          docker tag pgvector/pgvector:pg15 ghcr.io/${{ secrets.GHCR_USERNAME }}/raglearn-pgvector:${{ github.sha }}
           docker build -t ghcr.io/${{ secrets.GHCR_USERNAME }}/raglearn-backend:${{ github.sha }} ./backend
           docker build -t ghcr.io/${{ secrets.GHCR_USERNAME }}/raglearn-frontend:${{ github.sha }} ./frontend
 
       - name: Push deployment images to GHCR
         run: |
+          docker push ghcr.io/${{ secrets.GHCR_USERNAME }}/raglearn-redis:${{ github.sha }}
+          docker push ghcr.io/${{ secrets.GHCR_USERNAME }}/raglearn-pgvector:${{ github.sha }}
           docker push ghcr.io/${{ secrets.GHCR_USERNAME }}/raglearn-backend:${{ github.sha }}
           docker push ghcr.io/${{ secrets.GHCR_USERNAME }}/raglearn-frontend:${{ github.sha }}
 
