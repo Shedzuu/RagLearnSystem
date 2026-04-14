@@ -54,7 +54,7 @@ export const authApi = {
   },
 
   async register({ email, password, password_confirm, first_name, last_name }) {
-    return request('/auth/register/', {
+    await request('/auth/register/', {
       method: 'POST',
       body: JSON.stringify({
         email,
@@ -65,34 +65,6 @@ export const authApi = {
       }),
       skipAuth: true,
     })
-  },
-
-  async verifyEmail(email, code) {
-    const data = await request('/auth/verify-email/', {
-      method: 'POST',
-      body: JSON.stringify({ email, code }),
-      skipAuth: true,
-    })
-    setTokens(data.access, data.refresh)
-    return data
-  },
-
-  async resendVerification(email) {
-    return request('/auth/resend-verification/', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-      skipAuth: true,
-    })
-  },
-
-  async loginWithGoogle(credential) {
-    const data = await request('/auth/google/', {
-      method: 'POST',
-      body: JSON.stringify({ credential }),
-      skipAuth: true,
-    })
-    setTokens(data.access, data.refresh)
-    return data
   },
 
   async getMe() {

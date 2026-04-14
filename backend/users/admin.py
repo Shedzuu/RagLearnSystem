@@ -6,13 +6,13 @@ from .models import PaymentTransaction, User
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ('email', 'first_name', 'last_name', 'google_subject', 'subscription_plan', 'is_staff')
+    list_display = ('email', 'first_name', 'last_name', 'subscription_plan', 'is_staff')
     list_filter = ('subscription_plan', 'is_staff', 'is_superuser')
-    search_fields = ('email', 'first_name', 'last_name', 'google_subject')
+    search_fields = ('email', 'first_name', 'last_name')
     ordering = ('email',)
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
-        ('Personal', {'fields': ('first_name', 'last_name', 'google_subject')}),
+        ('Personal', {'fields': ('first_name', 'last_name')}),
         (
             'Subscription',
             {

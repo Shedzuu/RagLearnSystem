@@ -73,22 +73,8 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=validated_data['password'],
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', ''),
-            is_active=False,
         )
         return user
-
-
-class GoogleAuthSerializer(serializers.Serializer):
-    credential = serializers.CharField()
-
-
-class VerifyEmailSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    code = serializers.CharField(min_length=6, max_length=6)
-
-
-class ResendVerificationSerializer(serializers.Serializer):
-    email = serializers.EmailField()
 
 
 class SubscriptionUpdateSerializer(serializers.Serializer):
