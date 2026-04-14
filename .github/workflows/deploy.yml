@@ -24,6 +24,18 @@ jobs:
           rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -p 2222" ./ \
             mluser@212.134.241.141:/home/mluser/test
 
+      - name: Build deployment images on GitHub runner
+        run: |
+          docker pull redis:7-alpine
+          docker pull pgvector/pgvector:pg15
+          docker build -t test-app:${{ github.sha }} ./backend
+          docker build -t test-frontend:${{ github.sha }} ./frontend
+
+      - name: Upload Docker images to server
+        run: |
+          docker save redis:7-alpine pgvector/pgvector:pg15 test-app:${{ github.sha }} test-frontend:${{ github.sha }} | \
+            ssh -i ~/.ssh/deploy_key -p 2222 mluser@212.134.241.141 "docker load"
+
       - name: Deploy with Docker Compose
         run: |
           ssh -i ~/.ssh/deploy_key -p 2222 mluser@212.134.241.141 << EOF
@@ -37,9 +49,10 @@ jobs:
             export PROD_LLM_BASE_URL='${{ secrets.PROD_LLM_BASE_URL }}'
             export PROD_LLM_MODEL='${{ secrets.PROD_LLM_MODEL }}'
             export DEPLOY_HOST='${{ secrets.DEPLOY_HOST }}'
+            export APP_IMAGE_TAG='${{ github.sha }}'
             cd ~/test/infra
             for attempt in 1 2 3; do
-              if docker compose -p test -f docker-compose.yml up -d --build; then
+              if docker compose -p test -f docker-compose.yml up -d --no-build; then
                 exit 0
               fi
               echo "Docker Compose deploy failed on attempt \$attempt, retrying in 15 seconds..."
