@@ -20,7 +20,7 @@ services:
       - "5433:5432"
 
   backend:
-    image: test-app:${APP_IMAGE_TAG}
+    image: ghcr.io/${GHCR_OWNER}/raglearn-backend:${APP_IMAGE_TAG}
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py runserver 0.0.0.0:8000"
@@ -62,7 +62,7 @@ services:
       - redis
 
   worker:
-    image: test-app:${APP_IMAGE_TAG}
+    image: ghcr.io/${GHCR_OWNER}/raglearn-backend:${APP_IMAGE_TAG}
     command: celery -A config worker -l info
     restart: unless-stopped
     volumes:
@@ -96,7 +96,7 @@ services:
       - redis
 
   frontend:
-    image: test-frontend:${APP_IMAGE_TAG}
+    image: ghcr.io/${GHCR_OWNER}/raglearn-frontend:${APP_IMAGE_TAG}
     ports:
       - "5173:5173"
     volumes:
