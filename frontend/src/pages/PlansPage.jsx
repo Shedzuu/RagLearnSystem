@@ -59,13 +59,40 @@ export default function PlansPage() {
 
   if (loading || !user) return null
 
+  const totalPlans = plans.length
+  const readyPlans = plans.filter((plan) => plan.generation_status === 'ready').length
+  const activeUnits = plans.reduce((sum, plan) => sum + (plan.totalUnits || 0), 0)
+
   return (
     <div className={styles.page}>
       <AppHeader />
       <main className={styles.main}>
         <div className={styles.card}>
+          <div className={styles.hero}>
+            <div>
+              <p className={styles.eyebrow}>Dashboard</p>
+              <h1 className={styles.title}>My study plans</h1>
+              <p className={styles.subtitle}>
+                Keep your plans, progress and source materials in one place.
+              </p>
+            </div>
+            <div className={styles.summaryGrid}>
+              <div className={styles.summaryCard}>
+                <span className={styles.summaryLabel}>Plans</span>
+                <strong className={styles.summaryValue}>{totalPlans}</strong>
+              </div>
+              <div className={styles.summaryCard}>
+                <span className={styles.summaryLabel}>Ready</span>
+                <strong className={styles.summaryValue}>{readyPlans}</strong>
+              </div>
+              <div className={styles.summaryCard}>
+                <span className={styles.summaryLabel}>Units</span>
+                <strong className={styles.summaryValue}>{activeUnits}</strong>
+              </div>
+            </div>
+          </div>
           <div className={styles.headerRow}>
-            <h1 className={styles.title}>My study plans</h1>
+            <p className={styles.sectionCaption}>Choose a plan to continue learning or create a new one.</p>
             <div className={styles.actions}>
               <button
                 type="button"
@@ -96,11 +123,13 @@ export default function PlansPage() {
                   className={styles.item}
                   onClick={() => navigate(`/plans/${plan.id}`)}
                 >
-                  <h2 className={styles.planTitle}>{plan.title}</h2>
-                  {plan.description && <p className={styles.planDesc}>{plan.description}</p>}
-                  <p className={styles.planMeta}>
-                    Status: <strong>{plan.generation_status}</strong>
-                  </p>
+                  <div className={styles.itemTop}>
+                    <div>
+                      <h2 className={styles.planTitle}>{plan.title}</h2>
+                      {plan.description && <p className={styles.planDesc}>{plan.description}</p>}
+                    </div>
+                    <span className={styles.statusBadge}>{plan.generation_status}</span>
+                  </div>
                   <div className={styles.progressWrap}>
                     <div className={styles.progressMeta}>
                       <span>Progress</span>

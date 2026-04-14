@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import ThemeToggle from './ThemeToggle'
 import styles from './AppHeader.module.css'
@@ -28,6 +28,9 @@ export default function AppHeader() {
   }
 
   const onLanding = location.pathname === '/'
+  const displayName = user
+    ? [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email
+    : ''
 
   return (
     <header className={styles.header}>
@@ -35,21 +38,24 @@ export default function AppHeader() {
       <nav className={styles.nav}>
         {onLanding ? (
           <>
-            <button type="button" onClick={() => scrollTo('upload')}>Upload</button>
-            <button type="button" onClick={() => scrollTo('preview')}>Preview</button>
-            <button type="button" onClick={() => scrollTo('reviews')}>Reviews</button>
-            <button type="button" onClick={() => scrollTo('contacts')}>Contacts</button>
+            <button type="button" className={styles.navBtn} onClick={() => scrollTo('upload')}>Upload</button>
+            <button type="button" className={styles.navBtn} onClick={() => scrollTo('preview')}>Preview</button>
+            <button type="button" className={styles.navBtn} onClick={() => scrollTo('reviews')}>Reviews</button>
+            <button type="button" className={styles.navBtn} onClick={() => scrollTo('contacts')}>Contacts</button>
           </>
         ) : (
           <>
             {user && (
               <>
-                <button type="button" onClick={() => navigate('/plans')}>
+                <NavLink to="/plans" className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}>
                   Plans
-                </button>
-                <button type="button" onClick={() => navigate('/materials')}>
+                </NavLink>
+                <NavLink to="/materials" className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}>
                   Materials
-                </button>
+                </NavLink>
+                <NavLink to="/account" className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}>
+                  Account
+                </NavLink>
               </>
             )}
           </>
@@ -57,6 +63,12 @@ export default function AppHeader() {
       </nav>
       <div className={styles.headerRight}>
         <ThemeToggle />
+        {user && (
+          <button type="button" className={styles.accountChip} onClick={() => navigate('/account')}>
+            <span className={styles.accountChipName}>{displayName}</span>
+            <span className={styles.accountChipPlan}>{user.subscriptionPlanLabel}</span>
+          </button>
+        )}
         <div className={styles.profileWrap} ref={profileRef}>
           <button
             type="button"
@@ -68,7 +80,18 @@ export default function AppHeader() {
           </button>
           {user && profileOpen && (
             <div className={styles.profileDropdown}>
-              <p className={styles.profileName}>{user.firstName} {user.lastName}</p>
+              <p className={styles.profileName}>{displayName}</p>
+              <p className={styles.profilePlan}>{user.subscriptionPlanLabel} plan</p>
+              <button
+                type="button"
+                className={styles.profileMenuBtn}
+                onClick={() => {
+                  navigate('/account')
+                  setProfileOpen(false)
+                }}
+              >
+                Account
+              </button>
               <button
                 type="button"
                 className={styles.profileMenuBtn}

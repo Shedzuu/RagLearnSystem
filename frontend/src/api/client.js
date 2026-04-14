@@ -72,6 +72,17 @@ export const authApi = {
     return data
   },
 
+  async updateSubscription({ plan, autoRenew, paymentMethod }) {
+    return request('/auth/subscription/', {
+      method: 'POST',
+      body: JSON.stringify({
+        plan,
+        auto_renew: autoRenew,
+        payment_method: paymentMethod,
+      }),
+    })
+  },
+
   async refreshToken() {
     const refresh = getStoredRefresh()
     if (!refresh) throw new Error('No refresh token')

@@ -6,6 +6,7 @@ import PlansPage from './pages/PlansPage'
 import PlanDetailPage from './pages/PlanDetailPage'
 import UnitPage from './pages/UnitPage'
 import MaterialsPage from './pages/MaterialsPage'
+import AccountPage from './pages/AccountPage'
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<AuthPage />} />
       <Route path="/materials" element={<MaterialsPage />} />
+      <Route path="/account" element={<AccountPage />} />
       <Route path="/create-plan" element={<CreatePlanPage />} />
       <Route path="/plans" element={<PlansPage />} />
       <Route path="/plans/:id" element={<PlanDetailPage />} />
