@@ -67,10 +67,17 @@ export function AuthProvider({ children }) {
   }
 
   const register = async (data) => {
-    await authApi.register(data)
-    await authApi.login(data.email, data.password)
+    return authApi.register(data)
+  }
+
+  const verifyEmail = async (email, code) => {
+    await authApi.verifyEmail(email, code)
     const me = await authApi.getMe()
     setUser(mapUser(me))
+  }
+
+  const resendVerification = async (email) => {
+    return authApi.resendVerification(email)
   }
 
   const logout = () => {
@@ -86,7 +93,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithGoogle, register, logout, updateSubscription }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithGoogle, register, verifyEmail, resendVerification, logout, updateSubscription }}>
       {children}
     </AuthContext.Provider>
   )

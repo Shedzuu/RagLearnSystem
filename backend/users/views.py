@@ -1,4 +1,6 @@
+import secrets
 from django.conf import settings
+from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from datetime import timedelta
 from decimal import Decimal
@@ -15,8 +17,15 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import User
-from .serializers import GoogleAuthSerializer, RegisterSerializer, SubscriptionUpdateSerializer, UserSerializer
+from .models import EmailVerificationCode, User
+from .serializers import (
+    GoogleAuthSerializer,
+    RegisterSerializer,
+    ResendVerificationSerializer,
+    SubscriptionUpdateSerializer,
+    UserSerializer,
+    VerifyEmailSerializer,
+)
 
 
 class NoAuthMixin:
@@ -40,6 +49,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         val = attrs.get('email') or attrs.get('username')
         if not val:
             raise serializers.ValidationError({'email': 'Email is required.'})
+        user = User.objects.filter(email=val.strip().lower()).first()
+        if user and not user.is_active:
+            raise serializers.ValidationError(
+                {'detail': 'Please verify your email before signing in.'}
+            )
         attrs['email'] = val
         if 'username' in attrs:
             del attrs['username']
@@ -55,9 +69,116 @@ class RegisterView(NoAuthMixin, generics.CreateAPIView):
     permission_classes = (AllowAny,)
     serializer_class = RegisterSerializer
 
-    def perform_create(self, serializer):
+    @staticmethod
+    def _generate_code():
+        return ''.join(secrets.choice('0123456789') for _ in range(6))
+
+    @classmethod
+    def _issue_verification_code(cls, user):
+        EmailVerificationCode.objects.filter(
+            user=user,
+            consumed_at__isnull=True,
+        ).delete()
+        verification = EmailVerificationCode.objects.create(
+            user=user,
+            code=cls._generate_code(),
+            expires_at=timezone.now() + timedelta(minutes=settings.EMAIL_VERIFICATION_CODE_TTL_MINUTES),
+        )
+        return verification
+
+    @staticmethod
+    def _send_verification_email(user, verification):
+        send_mail(
+            subject='Confirm your email',
+            message=(
+                f'Hello {user.first_name or user.email},\n\n'
+                f'Your verification code is: {verification.code}\n'
+                f'This code expires in {settings.EMAIL_VERIFICATION_CODE_TTL_MINUTES} minutes.\n\n'
+                'If you did not create this account, you can ignore this email.'
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        return user
+        verification = self._issue_verification_code(user)
+        self._send_verification_email(user, verification)
+        return Response(
+            {
+                'detail': 'Verification code sent to your email.',
+                'email': user.email,
+            },
+            status=201,
+        )
+
+
+class VerifyEmailView(NoAuthMixin, APIView):
+    permission_classes = (AllowAny,)
+    serializer_class = VerifyEmailSerializer
+
+    @staticmethod
+    def _issue_tokens(user):
+        refresh = RefreshToken.for_user(user)
+        return {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+        }
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data['email'].strip().lower()
+        code = serializer.validated_data['code'].strip()
+        user = User.objects.filter(email=email).first()
+        if not user:
+            raise serializers.ValidationError({'detail': 'Account not found.'})
+        if user.is_active:
+            raise serializers.ValidationError({'detail': 'This email is already verified.'})
+
+        verification = EmailVerificationCode.objects.filter(
+            user=user,
+            code=code,
+            consumed_at__isnull=True,
+        ).first()
+        if not verification:
+            raise serializers.ValidationError({'detail': 'Invalid verification code.'})
+        if verification.is_expired:
+            raise serializers.ValidationError({'detail': 'Verification code has expired.'})
+
+        verification.consumed_at = timezone.now()
+        verification.save(update_fields=['consumed_at'])
+        user.is_active = True
+        user.save(update_fields=['is_active'])
+        EmailVerificationCode.objects.filter(
+            user=user,
+            consumed_at__isnull=True,
+        ).delete()
+        return Response(self._issue_tokens(user))
+
+
+class ResendVerificationView(NoAuthMixin, APIView):
+    permission_classes = (AllowAny,)
+    serializer_class = ResendVerificationSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data['email'].strip().lower()
+        user = User.objects.filter(email=email).first()
+        if not user:
+            raise serializers.ValidationError({'detail': 'Account not found.'})
+        if user.is_active:
+            raise serializers.ValidationError({'detail': 'This email is already verified.'})
+
+        verification = RegisterView._issue_verification_code(user)
+        RegisterView._send_verification_email(user, verification)
+        return Response({'detail': 'A new verification code was sent.'})
 
 
 class GoogleAuthView(NoAuthMixin, APIView):

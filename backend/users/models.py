@@ -63,3 +63,30 @@ class PaymentTransaction(models.Model):
 
     def __str__(self):
         return f'{self.user.email} {self.plan} {self.amount} {self.currency}'
+
+
+class EmailVerificationCode(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='email_verification_codes',
+    )
+    code = models.CharField(max_length=6)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'users_email_verification_code'
+        ordering = ['-created_at']
+
+    @property
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_consumed(self):
+        return self.consumed_at is not None
+
+    def __str__(self):
+        return f'{self.user.email} ({self.code})'
