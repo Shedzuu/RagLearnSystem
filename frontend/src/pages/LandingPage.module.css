@@ -99,11 +99,15 @@
   position: fixed;
   bottom: 2rem;
   right: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 56px;
   height: 56px;
+  padding: 0;
   border-radius: 50%;
   border: none;
-  background: var(--chat-btn-bg);
+  background: #f4fbf7;
   color: #fff;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
@@ -115,6 +119,7 @@
 }
 
 .chatBtnIcon {
+  display: block;
   width: 32px;
   height: 32px;
   object-fit: contain;
