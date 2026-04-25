@@ -10,6 +10,12 @@ function mapUser(apiUser) {
     email: apiUser.email,
     firstName: apiUser.first_name || '',
     lastName: apiUser.last_name || '',
+    subscriptionPlan: apiUser.subscription_plan || 'free',
+    subscriptionPlanLabel: apiUser.subscription_plan_label || 'Free',
+    subscriptionStartedAt: apiUser.subscription_started_at || null,
+    subscriptionEndsAt: apiUser.subscription_ends_at || null,
+    subscriptionAutoRenew: Boolean(apiUser.subscription_auto_renew),
+    latestPayment: apiUser.latest_payment || null,
   }
 }
 
@@ -66,8 +72,15 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
+  const updateSubscription = async ({ plan, autoRenew, paymentMethod }) => {
+    const updated = await authApi.updateSubscription({ plan, autoRenew, paymentMethod })
+    const mapped = mapUser(updated)
+    setUser(mapped)
+    return mapped
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updateSubscription }}>
       {children}
     </AuthContext.Provider>
   )

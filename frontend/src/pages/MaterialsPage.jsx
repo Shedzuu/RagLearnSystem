@@ -107,13 +107,38 @@ export default function MaterialsPage() {
 
   if (loading || !user) return null
 
+  const readyCount = materials.filter((material) => material.index_status === 'ready').length
+
   return (
     <div className={styles.page}>
       <AppHeader />
       <main className={styles.main}>
         <div className={styles.card}>
+          <div className={styles.hero}>
+            <div>
+              <p className={styles.eyebrow}>Library</p>
+              <h1 className={styles.title}>My materials</h1>
+              <p className={styles.subtitle}>
+                Upload notes, books or handouts and turn them into guided study plans.
+              </p>
+            </div>
+            <div className={styles.stats}>
+              <div className={styles.statCard}>
+                <span className={styles.statLabel}>Uploaded</span>
+                <strong className={styles.statValue}>{materials.length}</strong>
+              </div>
+              <div className={styles.statCard}>
+                <span className={styles.statLabel}>Ready</span>
+                <strong className={styles.statValue}>{readyCount}</strong>
+              </div>
+              <div className={styles.statCard}>
+                <span className={styles.statLabel}>Selected</span>
+                <strong className={styles.statValue}>{selectedIds.length}</strong>
+              </div>
+            </div>
+          </div>
           <div className={styles.headerRow}>
-            <h1 className={styles.title}>My materials</h1>
+            <p className={styles.helperText}>Select one or more files, then create a study plan from them.</p>
             <label className={styles.uploadBtn}>
               {uploading ? 'Uploading...' : 'Upload file'}
               <input
@@ -163,7 +188,7 @@ export default function MaterialsPage() {
                 onClick={handleCreatePlan}
                 disabled={!selectedIds.length}
               >
-                Create plan from selected
+                Create plan from selected materials
               </button>
             </>
           )}

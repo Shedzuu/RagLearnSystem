@@ -2,22 +2,24 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  border: 2px dashed #93c5fd;
-  border-radius: 12px;
-  padding: 2rem;
-  background: var(--card-bg);
+  border: 2px dashed color-mix(in srgb, var(--accent) 38%, #9fc8b7 62%);
+  border-radius: 22px;
+  padding: 3rem 2rem;
+  background:
+    radial-gradient(circle at top, rgba(127, 208, 178, 0.08), transparent 42%),
+    var(--card-bg);
   transition: border-color 0.2s, background 0.2s;
 }
 
 .zone.drag {
-  border-color: #2563eb;
-  background: #f8fafc;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 60%, var(--card-bg) 40%);
 }
 
 .uploadIcon {
-  width: 48px;
-  height: 48px;
-  margin-bottom: 1rem;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 1.1rem;
   object-fit: contain;
   display: block;
 }
@@ -39,18 +41,20 @@
 
 
 .button {
-  padding: 0.5rem 1.25rem;
+  padding: 0.75rem 1.4rem;
   font-size: 1rem;
   border: none;
-  border-radius: 8px;
-  background: #2563eb;
+  border-radius: 12px;
+  background: var(--accent);
   color: white;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, transform 0.2s;
+  box-shadow: 0 12px 24px rgba(47, 122, 102, 0.18);
 }
 
 .button:hover {
-  background: #1d4ed8;
+  background: var(--accent-strong);
+  transform: translateY(-1px);
 }
 
 .input {
@@ -59,4 +63,11 @@
   height: 0;
   opacity: 0;
   pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .zone {
+    padding: 2rem 1rem;
+    border-radius: 18px;
+  }
 }

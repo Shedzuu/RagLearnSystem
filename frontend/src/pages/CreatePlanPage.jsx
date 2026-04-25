@@ -54,7 +54,24 @@ export default function CreatePlanPage() {
 
       <main className={styles.main}>
         <div className={styles.card}>
-          <h1 className={styles.title}>Create study plan</h1>
+          <div className={styles.hero}>
+            <div>
+              <p className={styles.eyebrow}>Plan setup</p>
+              <h1 className={styles.title}>Create study plan</h1>
+              <p className={styles.subtitle}>
+                Name the plan, describe the learning outcome, and let AI help shape the goals.
+              </p>
+            </div>
+            <div className={styles.infoPanel}>
+              <p className={styles.infoLabel}>Selected materials</p>
+              <strong className={styles.infoValue}>{selectedDocumentIds.length}</strong>
+              <p className={styles.infoHint}>
+                {selectedDocumentIds.length > 0
+                  ? 'Your selected documents will be attached right after the plan is created.'
+                  : 'You can still create the plan first and attach materials later.'}
+              </p>
+            </div>
+          </div>
           {error && <p className={styles.error}>{error}</p>}
           <form onSubmit={handleSubmit} className={styles.form}>
             <label className={styles.label}>

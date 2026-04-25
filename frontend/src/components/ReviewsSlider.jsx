@@ -26,8 +26,17 @@ export default function ReviewsSlider({ items }) {
       <div className={styles.row}>
         {visibleItems.map((item, i) => (
           <div key={i} className={styles.block}>
-            <div className={styles.placeholder}>photo</div>
-            <p className={styles.title}>{item.title}</p>
+            <div className={styles.placeholder}>
+              {item.image ? (
+                <img src={item.image} alt={item.title} className={styles.image} />
+              ) : (
+                <span className={styles.fallback}>photo</span>
+              )}
+            </div>
+            <div className={styles.metaRow}>
+              <p className={styles.title}>{item.title}</p>
+              {item.meta && <span className={styles.meta}>{item.meta}</span>}
+            </div>
             <p className={styles.text}>{item.text}</p>
           </div>
         ))}
