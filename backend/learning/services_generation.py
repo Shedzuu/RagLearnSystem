@@ -61,15 +61,14 @@ def _output_language_instruction(plan: Plan) -> str:
 
 def strip_light_markdown_for_ui(text: str) -> str:
     """
-    Remove bold/underscore markdown that the UI shows verbatim (no markdown renderer).
-    Keeps plain text; strips **word** and __word__ repeatedly.
+    Remove bold markdown that the UI shows verbatim (no markdown renderer).
+    Strips **word** only; does not strip __word__ (keeps Python dunders like __init__).
     """
     if not text:
         return ""
     s = str(text)
     for _ in range(16):
         nxt = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
-        nxt = re.sub(r"__([^_]+)__", r"\1", nxt)
         if nxt == s:
             break
         s = nxt

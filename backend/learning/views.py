@@ -1293,12 +1293,54 @@ class PreplanChatView(APIView):
             except (TypeError, ValueError):
                 blob = str(data)
             return {"reply": blob, "suggested_goals": "", "topics": [], "questions": []}
+        if isinstance(data, bool):
+            return {
+                "reply": "да" if data else "нет",
+                "suggested_goals": "",
+                "topics": [],
+                "questions": [],
+            }
+        if isinstance(data, (int, float)):
+            # Top-level number from provider — not a valid preplan object; avoid showing raw floats in UI.
+            return {"reply": "", "suggested_goals": "", "topics": [], "questions": []}
         return {
             "reply": strip_light_markdown_for_ui(str(data)),
             "suggested_goals": "",
             "topics": [],
             "questions": [],
         }
+
+    @staticmethod
+    def _preplan_json_string_field(val) -> str:
+        """
+        LLM sometimes returns numbers/bools in 'reply' or 'suggested_goals'; never stringify floats for display.
+        """
+        if val is None:
+            return ""
+        if isinstance(val, str):
+            return strip_light_markdown_for_ui(val)
+        if isinstance(val, bool):
+            return "да" if val else "нет"
+        if isinstance(val, (int, float)):
+            return ""
+        if isinstance(val, (dict, list)):
+            try:
+                return strip_light_markdown_for_ui(json.dumps(val, ensure_ascii=False))
+            except (TypeError, ValueError):
+                return strip_light_markdown_for_ui(str(val))
+        return strip_light_markdown_for_ui(str(val))
+
+    @staticmethod
+    def _preplan_reply_fallback_if_bad_numeric(data: dict, reply_text: str) -> str:
+        if reply_text.strip():
+            return reply_text
+        raw = data.get("reply")
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            return (
+                "Модель вернула число вместо текста в поле ответа (ошибка формата JSON). "
+                "Повторите вопрос одной фразой, например: «Что в разделе 6 про классы, атрибуты и методы?»"
+            )
+        return reply_text
 
     def post(self, request, *args, **kwargs):
         raw_doc_ids = request.data.get("document_ids")
@@ -1375,7 +1417,8 @@ class PreplanChatView(APIView):
                 "- reply: string (plain text, no markdown)\n"
                 "- suggested_goals: string\n"
                 "- topics: array of strings\n"
-                "- questions: array of strings\n\n"
+                "- questions: array of strings\n"
+                "- IMPORTANT: 'reply' and 'suggested_goals' must be JSON strings (quoted), never bare numbers.\n\n"
                 f"Form context:\n{form_context}\n"
             )
             messages = [{"role": "system", "content": system_prompt}]
@@ -1406,8 +1449,7 @@ class PreplanChatView(APIView):
                         f"{content}"
                     )
                     data = llm.complete_json(repair_system, repair_user)
-                if not isinstance(data, dict):
-                    raise ValueError("LLM returned non-object JSON.")
+                data = self._coerce_preplan_json_payload(data)
                 raw_topics = data.get("topics") or []
                 if isinstance(raw_topics, list):
                     topics_plain = [strip_light_markdown_for_ui(str(t)) for t in raw_topics]
@@ -1418,10 +1460,15 @@ class PreplanChatView(APIView):
                     questions_plain = [strip_light_markdown_for_ui(str(t)) for t in raw_qs]
                 else:
                     questions_plain = []
+                reply_out = PreplanChatView._preplan_reply_fallback_if_bad_numeric(
+                    data,
+                    PreplanChatView._preplan_json_string_field(data.get("reply")),
+                )
+                goals_out = PreplanChatView._preplan_json_string_field(data.get("suggested_goals"))
                 return Response(
                     {
-                        "reply": strip_light_markdown_for_ui(str(data.get("reply") or "")),
-                        "suggested_goals": strip_light_markdown_for_ui(str(data.get("suggested_goals") or "")),
+                        "reply": reply_out,
+                        "suggested_goals": goals_out,
                         "topics": topics_plain,
                         "questions": questions_plain,
                         "exact_topics": [],
@@ -1677,7 +1724,8 @@ class PreplanChatView(APIView):
                 "- topics: array of strings (exact topic names from source)\n"
                 "- questions: array of strings (keep empty array)\n"
                 "- truncated: boolean (true if output had to be shortened)\n"
-                "- exact_topics: array of objects with keys: title (string), page (number|null)\n\n"
+                "- exact_topics: array of objects with keys: title (string), page (number|null)\n"
+                "- IMPORTANT: 'reply' and 'suggested_goals' must be JSON strings (quoted), never bare numbers.\n\n"
                 f"Materials excerpts (retrieved):\n{context}\n"
             )
         else:
@@ -1698,7 +1746,8 @@ class PreplanChatView(APIView):
                 "- reply: string (your full answer as plain text, no markdown)\n"
                 "- suggested_goals: string (clean text the user can paste; may be empty if the user only asked for content, not goals)\n"
                 "- topics: array of strings\n"
-                "- questions: array of strings (may be empty if the user only asked for a factual summary)\n\n"
+                "- questions: array of strings (may be empty if the user only asked for a factual summary)\n"
+                "- IMPORTANT: 'reply' and 'suggested_goals' must be JSON strings (quoted), never bare numbers.\n\n"
                 f"Materials excerpts (retrieved):\n{context}\n"
             )
 
@@ -1763,10 +1812,15 @@ class PreplanChatView(APIView):
                 questions_plain = [strip_light_markdown_for_ui(str(t)) for t in raw_qs]
             else:
                 questions_plain = []
+            reply_out = PreplanChatView._preplan_reply_fallback_if_bad_numeric(
+                data,
+                PreplanChatView._preplan_json_string_field(data.get("reply")),
+            )
+            goals_out = PreplanChatView._preplan_json_string_field(data.get("suggested_goals"))
             return Response(
                 {
-                    "reply": strip_light_markdown_for_ui(str(data.get("reply") or "")),
-                    "suggested_goals": strip_light_markdown_for_ui(str(data.get("suggested_goals") or "")),
+                    "reply": reply_out,
+                    "suggested_goals": goals_out,
                     "topics": topics_plain,
                     "questions": questions_plain,
                     "exact_topics": exact_topics,
