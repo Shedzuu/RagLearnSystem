@@ -3,7 +3,15 @@ import { plansApi } from '../api/client'
 import { stripLightMarkdown } from '../utils/plainChatText'
 import styles from './PreplanChatPanel.module.css'
 
-export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApplyGoals }) {
+export default function PreplanChatPanel({
+  isOpen,
+  onClose,
+  documentIds,
+  planTitle = '',
+  planDescription = '',
+  goalsDraft = '',
+  onApplyGoals,
+}) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -22,6 +30,8 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
   }
 
   if (!isOpen) return null
+
+  const hasMaterials = (documentIds?.length || 0) > 0
 
   const resolveMode = (text, requestedMode = 'auto') => {
     if (requestedMode === 'semantic' || requestedMode === 'exact') return requestedMode
@@ -59,6 +69,9 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
         message: trimmed,
         history: serializedHistory,
         mode: resolvedMode,
+        planTitle,
+        planDescription,
+        goalsDraft,
       })
       if (res.suggested_goals) setSuggestedGoals(res.suggested_goals)
       setMessages((prev) => {
@@ -99,6 +112,12 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
             <img src="/assets/ai_robot.png" alt="AI" className={styles.metaIcon} />
             <div className={styles.metaText}>
               Selected documents: <strong>{documentIds?.length || 0}</strong>
+              {(documentIds?.length || 0) === 0 && (
+                <span className={styles.metaHint}>
+                  {' '}
+                  — without files, AI uses only title, description, and your goals draft above.
+                </span>
+              )}
             </div>
           </div>
           <div className={styles.quickRow}>
@@ -110,7 +129,8 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
                   'List the main topics you found in the selected materials. Ask me 3-5 clarifying questions, then propose a suggested goals text for the plan.'
                 )
               }
-              disabled={loading}
+              disabled={loading || !hasMaterials}
+              title={!hasMaterials ? 'Select materials on the previous step to analyze the book' : undefined}
             >
               Analyze materials
             </button>
@@ -123,7 +143,8 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
                   'exact'
                 )
               }
-              disabled={loading}
+              disabled={loading || !hasMaterials}
+              title={!hasMaterials ? 'Select materials on the previous step' : undefined}
             >
               Extract exact topics
             </button>
@@ -143,7 +164,9 @@ export default function PreplanChatPanel({ isOpen, onClose, documentIds, onApply
           {messages.length === 0 && (
             <div className={styles.welcome}>
               <p className={styles.welcomeText}>
-                I can read the selected documents and help you write better learning goals for a higher-quality plan.
+                {hasMaterials
+                  ? 'I can read the selected documents and help you write better learning goals for a higher-quality plan.'
+                  : 'No materials selected — describe your plan above, then chat here to sharpen goals from title and description.'}
               </p>
             </div>
           )}

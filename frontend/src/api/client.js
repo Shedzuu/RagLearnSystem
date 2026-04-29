@@ -182,7 +182,15 @@ export const plansApi = {
     })
   },
 
-  async sendPreplanChat({ documentIds, message, history, mode = 'semantic' }) {
+  async sendPreplanChat({
+    documentIds,
+    message,
+    history,
+    mode = 'semantic',
+    planTitle,
+    planDescription,
+    goalsDraft,
+  }) {
     return request('/ai/preplan-chat/', {
       method: 'POST',
       body: JSON.stringify({
@@ -190,6 +198,9 @@ export const plansApi = {
         message,
         history: history || [],
         mode,
+        plan_title: planTitle || '',
+        plan_description: planDescription || '',
+        goals_draft: goalsDraft || '',
       }),
     })
   },

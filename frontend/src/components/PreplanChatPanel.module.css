@@ -73,6 +73,11 @@
   color: var(--text, #333);
 }
 
+.metaHint {
+  font-weight: 400;
+  color: var(--text-muted, #666);
+}
+
 .quickRow {
   display: flex;
   gap: 0.5rem;

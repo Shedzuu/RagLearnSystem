@@ -103,15 +103,13 @@ export default function CreatePlanPage() {
                 placeholder="E.g. learn loops, variables, conditionals and dictionaries from the selected materials."
               />
             </label>
-            {selectedDocumentIds.length > 0 && (
-              <button
-                type="button"
-                className={styles.aiBtn}
-                onClick={() => setPreplanChatOpen(true)}
-              >
-                Help me write goals with AI
-              </button>
-            )}
+            <button
+              type="button"
+              className={styles.aiBtn}
+              onClick={() => setPreplanChatOpen(true)}
+            >
+              Help me write goals with AI
+            </button>
             <button type="submit" className={styles.btn} disabled={submitting}>
               {submitting ? 'Creating…' : 'Create plan'}
             </button>
@@ -123,6 +121,9 @@ export default function CreatePlanPage() {
         isOpen={preplanChatOpen}
         onClose={() => setPreplanChatOpen(false)}
         documentIds={selectedDocumentIds}
+        planTitle={name}
+        planDescription={description}
+        goalsDraft={goals}
         onApplyGoals={(text) => {
           setGoals(text)
           setPreplanChatOpen(false)

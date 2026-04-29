@@ -1152,16 +1152,23 @@ class PreplanChatView(APIView):
         return combined
 
     def post(self, request, *args, **kwargs):
-        document_ids = request.data.get("document_ids") or []
+        raw_doc_ids = request.data.get("document_ids")
+        if raw_doc_ids is None:
+            raw_doc_ids = []
+        if not isinstance(raw_doc_ids, list):
+            return Response(
+                {"detail": "document_ids must be a list (may be empty)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        document_ids: list[int] = []
+        for x in raw_doc_ids:
+            try:
+                document_ids.append(int(x))
+            except (TypeError, ValueError):
+                continue
         message = (request.data.get("message") or "").strip()
         history = request.data.get("history") or []
         requested_mode = (request.data.get("mode") or "auto").strip().lower()
-
-        if not isinstance(document_ids, list) or not document_ids:
-            return Response(
-                {"detail": "document_ids (non-empty list) is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         if not message:
             return Response(
                 {"detail": "message is required."},
@@ -1193,6 +1200,92 @@ class PreplanChatView(APIView):
                 mode = requested_mode
             else:
                 mode = "exact" if self._history_has_exact_topics(history) else "semantic"
+
+        # No materials: still help with goals from form fields (title, description, draft).
+        if not document_ids:
+            mode = "semantic"
+            plan_title = (request.data.get("plan_title") or "").strip()
+            plan_description = (request.data.get("plan_description") or "").strip()
+            goals_draft = (request.data.get("goals_draft") or "").strip()
+            form_context = (
+                f"Plan title: {plan_title or 'N/A'}\n"
+                f"Plan description: {plan_description or 'N/A'}\n"
+                f"Current learning goals draft: {goals_draft or 'N/A'}\n"
+            )
+            system_prompt = (
+                "You are an expert instructional designer and tutor.\n"
+                "The user is creating a study plan but has not selected attached documents in this step.\n"
+                "Help them write clear learning goals using ONLY the plan title, description, and goals draft below.\n"
+                "Do not claim you read a book or document; infer broad topic areas only from the title/description.\n\n"
+                "Rules:\n"
+                "- List plausible topic areas inferred from the title/description.\n"
+                "- Ask 3-7 clarifying questions (level, scope, priorities, time, prerequisites).\n"
+                "- Propose 'suggested_goals' as concise text the user can paste into a form.\n"
+                "- Reply in the same language as the user.\n\n"
+                "Return ONLY valid JSON with keys:\n"
+                "- reply: string (plain text, no markdown)\n"
+                "- suggested_goals: string\n"
+                "- topics: array of strings\n"
+                "- questions: array of strings\n\n"
+                f"Form context:\n{form_context}\n"
+            )
+            messages = [{"role": "system", "content": system_prompt}]
+            for h in history[-20:]:
+                role = h.get("role", "user")
+                content = h.get("content", "")
+                if role in ("user", "assistant") and content:
+                    messages.append({"role": role, "content": content})
+            messages.append({"role": "user", "content": message})
+            try:
+                resp = llm._client.chat.completions.create(
+                    model=llm.model_name,
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.3,
+                    max_tokens=1200,
+                )
+                content = resp.choices[0].message.content or "{}"
+                try:
+                    data = json.loads(content)
+                except json.JSONDecodeError:
+                    repair_system = (
+                        "You repair malformed JSON. "
+                        "Return ONLY valid JSON object, no markdown/comments."
+                    )
+                    repair_user = (
+                        "Repair this malformed JSON while preserving meaning and keys when possible:\n\n"
+                        f"{content}"
+                    )
+                    data = llm.complete_json(repair_system, repair_user)
+                if not isinstance(data, dict):
+                    raise ValueError("LLM returned non-object JSON.")
+                raw_topics = data.get("topics") or []
+                if isinstance(raw_topics, list):
+                    topics_plain = [strip_light_markdown_for_ui(str(t)) for t in raw_topics]
+                else:
+                    topics_plain = []
+                raw_qs = data.get("questions") or []
+                if isinstance(raw_qs, list):
+                    questions_plain = [strip_light_markdown_for_ui(str(t)) for t in raw_qs]
+                else:
+                    questions_plain = []
+                return Response(
+                    {
+                        "reply": strip_light_markdown_for_ui(str(data.get("reply") or "")),
+                        "suggested_goals": strip_light_markdown_for_ui(str(data.get("suggested_goals") or "")),
+                        "topics": topics_plain,
+                        "questions": questions_plain,
+                        "exact_topics": [],
+                        "truncated": bool(data.get("truncated", False)),
+                        "mode": mode,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            except Exception as exc:
+                return Response(
+                    {"detail": f"AI error: {str(exc)}"},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
 
         docs = list(
             Document.objects.filter(id__in=document_ids, owner=request.user).order_by("id")
