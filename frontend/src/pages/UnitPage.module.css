@@ -10,6 +10,7 @@
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr) 320px;
   height: calc(100vh - 64px);
+  overflow: hidden;
 }
 
 .sidebar {
@@ -17,6 +18,7 @@
   padding: 1.5rem 1rem;
   background: var(--card-bg);
   overflow-y: auto;
+  min-height: 0;
 }
 
 .sidebarTitle {
@@ -141,6 +143,7 @@
 
 .content {
   overflow-y: auto;
+  min-height: 0;
 }
 
 .contentInner {
@@ -150,8 +153,12 @@
 }
 
 .chatColumn {
-  height: 100%;
+  height: calc(100vh - 64px);
   overflow: hidden;
+  min-height: 0;
+  position: sticky;
+  top: 64px;
+  align-self: start;
 }
 
 .questionHeader {
