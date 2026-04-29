@@ -1001,7 +1001,7 @@ class PreplanChatView(APIView):
     def _route_preplan_mode(llm: LLMClient, message: str, history, requested_mode: str) -> str:
         """
         LLM router: exact (TOC-like listing from sources) vs semantic (goals / discussion).
-        Subtopics drill-down intentionally disabled — only main themes are used in exact mode.
+        Follow-up drill-down (subtopics) is handled later via fast-path skip + LLM/RAG or stored subtopics.
         """
         route = llm.complete_json(
             "You are an intent router for a pre-plan study assistant. "
@@ -1150,6 +1150,127 @@ class PreplanChatView(APIView):
                 seen.add(key)
                 combined.append({"title": title, "page": None, "subtopics": []})
         return combined
+
+    @staticmethod
+    def _user_requests_subtopics_drilldown(message: str) -> bool:
+        """User asks for subsections / nested headings under a chapter or topic number."""
+        m = (message or "").strip().lower()
+        if not m:
+            return False
+        markers = (
+            "подтем",
+            "под тем",
+            "под топ",
+            "подтопик",
+            "подраздел",
+            "подразд",
+            "сабтопик",
+            "subtopic",
+            "subsection",
+            "дочерн",
+            "вложен",
+            "детализ",
+            "раскрой",
+            "раскрыть",
+            "внутр",
+            "что входит",
+            "содержание глав",
+            "состав глав",
+            "пункты ",
+            "подпункт",
+            "нижн уров",
+            "детальн список",
+        )
+        if any(x in m for x in markers):
+            return True
+        if re.search(
+            r"(?:тем\w*|глав\w*|раздел\w*|пункт\w*|chapter|section)\s*[№#]?\s*\d+",
+            m,
+            flags=re.IGNORECASE,
+        ):
+            return True
+        if re.search(r"\b#\s*\d+\b", m):
+            return True
+        return False
+
+    @staticmethod
+    def _exact_top_level_outline_already_sent(history) -> bool:
+        if not isinstance(history, list):
+            return False
+        for h in history:
+            if h.get("role") != "assistant":
+                continue
+            c = str(h.get("content") or "").lower()
+            if "верхний уровень оглавления" in c:
+                return True
+            if "exact topics from sources" in c:
+                return True
+        return False
+
+    @staticmethod
+    def _exact_outline_fast_path_ok(message: str, history) -> bool:
+        """
+        First shot: return stored top-level outline only once.
+        Follow-ups (subtopics, «тема 2», etc.) must go to LLM / stored children.
+        """
+        if PreplanChatView._user_requests_subtopics_drilldown(message):
+            return False
+        if PreplanChatView._exact_top_level_outline_already_sent(history):
+            return False
+        return True
+
+    @staticmethod
+    def _parse_section_index_from_message(message: str) -> int | None:
+        """1-based index from «тема 2», «глава 3», etc. Returns None if not found."""
+        m = (message or "").strip().lower()
+        ma = re.search(
+            r"(?:тем\w*|глав\w*|раздел\w*|пункт\w*|chapter|section)\s*[№#]?\s*(\d{1,3})\b",
+            m,
+            flags=re.IGNORECASE,
+        )
+        if ma:
+            return int(ma.group(1))
+        ma = re.search(r"\b#\s*(\d{1,3})\b", m)
+        if ma:
+            return int(ma.group(1))
+        return None
+
+    @staticmethod
+    def _try_stored_subtopics_for_section(
+        combined_outline: list[dict], message: str
+    ) -> tuple[list[dict], str] | None:
+        """
+        If outline nodes have subtopics and user points to section N, return flat exact_topics.
+        Returns (exact_topics_list, reply_text) or None to fall back to LLM.
+        """
+        if not combined_outline or not PreplanChatView._user_requests_subtopics_drilldown(message):
+            return None
+        idx_1 = PreplanChatView._parse_section_index_from_message(message)
+        if idx_1 is None or idx_1 < 1 or idx_1 > len(combined_outline):
+            return None
+        node = combined_outline[idx_1 - 1]
+        if not isinstance(node, dict):
+            return None
+        title = PreplanChatView._clean_topic_text(node.get("title") or "")
+        raw_children = node.get("subtopics") or []
+        if not raw_children:
+            return None
+        out: list[dict] = []
+        for ch in raw_children:
+            if not isinstance(ch, dict):
+                continue
+            ct = PreplanChatView._clean_topic_text(ch.get("title") or "")
+            if not ct:
+                continue
+            pg = ch.get("page") if isinstance(ch.get("page"), int) else None
+            out.append({"title": ct, "page": pg})
+        if not out:
+            return None
+        reply = (
+            f"Подтемы для «{title}» из сохранённого оглавления (как в документе). "
+            "Если списка мало — в исходном извлечении не было вложенности; тогда нужен второй проход по тексту."
+        )
+        return (out, reply)
 
     def post(self, request, *args, **kwargs):
         raw_doc_ids = request.data.get("document_ids")
@@ -1369,7 +1490,8 @@ class PreplanChatView(APIView):
             combined_outline = self._unwrap_toc_root_outline(combined_outline)
             if not combined_outline:
                 combined_outline = self._outline_from_flat_extracted_topics(docs)
-            if combined_outline:
+
+            if combined_outline and self._exact_outline_fast_path_ok(message, history):
                 return Response(
                     {
                         "reply": (
@@ -1386,23 +1508,76 @@ class PreplanChatView(APIView):
                     status=status.HTTP_200_OK,
                 )
 
+            if combined_outline and self._user_requests_subtopics_drilldown(message):
+                stored_sub = self._try_stored_subtopics_for_section(combined_outline, message)
+                if stored_sub is not None:
+                    sub_list, sub_reply = stored_sub
+                    return Response(
+                        {
+                            "reply": sub_reply,
+                            "suggested_goals": "",
+                            "topics": [x["title"] for x in sub_list],
+                            "questions": [],
+                            "exact_topics": sub_list,
+                            "truncated": False,
+                            "mode": mode,
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+
+        exact_drilldown = mode == "exact" and not self._exact_outline_fast_path_ok(message, history)
+
+        outline_for_drill_query: list[dict] = []
+        if mode == "exact" and exact_drilldown:
+            outline_for_drill_query = self._unwrap_toc_root_outline(self._build_combined_outline(docs))
+            if not outline_for_drill_query:
+                outline_for_drill_query = self._outline_from_flat_extracted_topics(docs)
+
         rag = DocumentRAGService()
         try:
             if mode == "exact":
-                # Prefer deterministic "start of book" extraction for TOC-like requests.
-                context = self._build_exact_context_from_document_start(
-                    docs,
-                    max_total_chars=22000,
-                    per_doc_cap=9000,
-                )
-                # Fallback to vector RAG only if start-of-document extraction is empty.
-                if not context:
+                if exact_drilldown:
+                    rag_query = message
+                    sec_idx = self._parse_section_index_from_message(message)
+                    if (
+                        sec_idx is not None
+                        and 1 <= sec_idx <= len(outline_for_drill_query)
+                    ):
+                        parent_title = PreplanChatView._clean_topic_text(
+                            outline_for_drill_query[sec_idx - 1].get("title") or ""
+                        )
+                        if parent_title:
+                            rag_query = (
+                                f"{message}\n\n"
+                                f"Section from book outline (use this to find subheadings in the source): {parent_title}"
+                            )
                     context = rag.build_context(
                         docs,
-                        query=message,
-                        top_k=35,
-                        max_total_chars=18000,
+                        query=rag_query,
+                        top_k=42,
+                        max_total_chars=24000,
                     )
+                    if not context:
+                        context = self._build_exact_context_from_document_start(
+                            docs,
+                            max_total_chars=28000,
+                            per_doc_cap=12000,
+                        )
+                else:
+                    # Prefer deterministic "start of book" extraction for TOC-like requests.
+                    context = self._build_exact_context_from_document_start(
+                        docs,
+                        max_total_chars=22000,
+                        per_doc_cap=9000,
+                    )
+                    # Fallback to vector RAG only if start-of-document extraction is empty.
+                    if not context:
+                        context = rag.build_context(
+                            docs,
+                            query=message,
+                            top_k=35,
+                            max_total_chars=18000,
+                        )
             else:
                 context = rag.build_context(docs, query=message, top_k=30, max_total_chars=16000)
         except Exception:
@@ -1437,11 +1612,20 @@ class PreplanChatView(APIView):
             )
 
         if mode == "exact":
-            exact_scope_rules = (
-                "- Return ONLY top-level themes/sections (main headings).\n"
-                "- Do NOT include nested subtopics or subsections.\n"
-                "- In 'reply', briefly confirm you listed main headings only — do NOT ask about subtopics.\n"
-            )
+            if exact_drilldown:
+                exact_scope_rules = (
+                    "- The user asks for SUBTOPICS, subsections, or nested headings under a specific chapter/section.\n"
+                    "- Copy titles EXACTLY as in the excerpts (no paraphrase).\n"
+                    "- Return ONLY lines that are children of the section the user meant (e.g. «тема 2», «глава 3»).\n"
+                    "- Preserve numbering prefixes from the source in 'title' when they appear (e.g. «2.1 …»).\n"
+                    "- If excerpts do not show subheadings for that section, say so in 'reply' and return empty exact_topics.\n"
+                )
+            else:
+                exact_scope_rules = (
+                    "- Return ONLY top-level themes/sections (main headings).\n"
+                    "- Do NOT include nested subtopics or subsections.\n"
+                    "- In 'reply', briefly confirm you listed main headings only — do NOT ask about subtopics.\n"
+                )
             system_prompt = (
                 "You are a precise document analyst.\n"
                 "You will receive excerpts from selected study materials.\n"
@@ -1495,12 +1679,13 @@ class PreplanChatView(APIView):
 
         try:
             # Prefer JSON response format when supported
+            _exact_max = 2200 if (mode == "exact" and exact_drilldown) else (1300 if mode == "exact" else 1200)
             resp = llm._client.chat.completions.create(
                 model=llm.model_name,
                 messages=messages,
                 response_format={"type": "json_object"},
                 temperature=0.3,
-                max_tokens=1300 if mode == "exact" else 1200,
+                max_tokens=_exact_max,
             )
             content = resp.choices[0].message.content or "{}"
             try:
