@@ -11,6 +11,9 @@ from .services_rag import DocumentRAGService, index_documents
 
 logger = logging.getLogger(__name__)
 
+# Providers (e.g. DashScope compatible-mode) reject max_tokens above this; clamp in LLMClient.
+_LLM_MAX_OUTPUT_TOKENS_CAP = int(os.getenv("LLM_MAX_OUTPUT_TOKENS_CAP", "16384"))
+
 # Outline step: broad RAG slice for structuring the course.
 _DEFAULT_GENERATION_CONTEXT_CHARS = int(os.getenv("LLM_GENERATION_CONTEXT_CHARS", "52000"))
 _DEFAULT_GENERATION_TOP_K_PER_TOPIC = int(os.getenv("LLM_GENERATION_TOP_K_PER_TOPIC", "28"))
@@ -114,7 +117,16 @@ class LLMClient:
         ]
         kwargs: dict = {"temperature": temperature}
         if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
+            cap = max(1, _LLM_MAX_OUTPUT_TOKENS_CAP)
+            clamped = max(1, min(int(max_tokens), cap))
+            if clamped != max_tokens:
+                logger.info(
+                    "[generate] max_tokens %s clamped to %s (LLM_MAX_OUTPUT_TOKENS_CAP=%s)",
+                    max_tokens,
+                    clamped,
+                    cap,
+                )
+            kwargs["max_tokens"] = clamped
         last_exc: Exception | None = None
         for attempt in range(3):
             try:

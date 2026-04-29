@@ -1,17 +1,22 @@
 from celery import shared_task
 import logging
+import os
 import re
 
 from .models import Document
-from .services_rag import index_documents, _load_document_text
+from .services_rag import index_documents, load_document_text_for_toc
 from .services_generation import LLMClient
 
 logger = logging.getLogger(__name__)
 
-# Single LLM pass: one coherent view of the start of the document (TOC region).
-OUTLINE_INPUT_CHAR_LIMIT = 140_000
-# Deep outlines (3+ levels); completion can be long.
-OUTLINE_LLM_MAX_TOKENS = 24_576
+# Single LLM pass: текст для TOC уже урезан в load_document_text_for_toc (начало книги).
+# Доп. потолок на всякий случай (плотный PDF за 30 стр.).
+OUTLINE_INPUT_CHAR_LIMIT = int(os.getenv("OUTLINE_INPUT_CHAR_LIMIT", "140000"))
+# Deep outlines (3+ levels). DashScope allows max_tokens in [1, 16384] for many chat models.
+OUTLINE_LLM_MAX_TOKENS = min(
+    16_384,
+    int(os.getenv("OUTLINE_LLM_MAX_TOKENS", "16384")),
+)
 
 
 def _preprocess_toc_text(text: str) -> str:
@@ -186,7 +191,7 @@ def _flatten_topics_dfs(outline: list[dict]) -> list[str]:
 def _extract_outline_with_llm(text: str) -> tuple[list[dict], list[str]]:
     """
     One LLM call over the beginning of the document: full outline + flat topics list.
-    Same strategy as originally: model sees one continuous excerpt (TOC / headings region).
+    Caller should pass only the document head (e.g. first pages) — see load_document_text_for_toc.
     """
     llm = LLMClient()
     preprocessed = _preprocess_toc_text(text)
@@ -299,7 +304,7 @@ def extract_document_topics_task(self, document_id: int) -> int:
     doc.save(update_fields=["topics_status", "topics_error"])
 
     try:
-        text = _load_document_text(doc) or ""
+        text = load_document_text_for_toc(doc) or ""
         outline, topics = _extract_outline_with_llm(text)
         # Final fallback for hard OCR cases.
         if not outline and text:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import List, Dict, Tuple, Set
 
@@ -20,6 +21,11 @@ MAX_CHUNKS_PER_PLAN = 5000
 MIN_CHUNKS_PER_TOPIC = 2
 # Защита от «раздутого» текста из docx/pdf (служебные данные, повторы)
 MAX_CHARS_PER_DOCUMENT = 300_000
+
+# Извлечение оглавления: обычно в начале книги — не кормим модель всем документом.
+OUTLINE_TOC_MAX_PAGES = max(1, int(os.getenv("OUTLINE_TOC_MAX_PAGES", "30")))
+OUTLINE_TOC_CHARS_PER_PAGE_ESTIMATE = max(100, int(os.getenv("OUTLINE_TOC_CHARS_PER_PAGE", "2500")))
+OUTLINE_TOC_CHAR_BUDGET = OUTLINE_TOC_MAX_PAGES * OUTLINE_TOC_CHARS_PER_PAGE_ESTIMATE
 
 
 class EmbeddingService:
@@ -91,6 +97,69 @@ def _load_document_text(doc: Document) -> str:
 
     # Fallback: try to read as text
     return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def load_document_text_for_toc(doc: Document) -> str:
+    """
+    Начало документа для извлечения TOC/топиков.
+    - PDF: реально первые OUTLINE_TOC_MAX_PAGES страниц.
+    - TXT/MD/DOCX и пр.: первые ~OUTLINE_TOC_CHAR_BUDGET символов (страниц нет в тексте).
+    """
+    path = Path(settings.BASE_DIR) / doc.file_path
+    suffix = path.suffix.lower()
+    max_pages = OUTLINE_TOC_MAX_PAGES
+    char_budget = OUTLINE_TOC_CHAR_BUDGET
+
+    if suffix == ".pdf":
+        try:
+            import PyPDF2  # type: ignore
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("PyPDF2 is required to extract text from PDF") from exc
+        text_parts: List[str] = []
+        with path.open("rb") as f:
+            reader = PyPDF2.PdfReader(f)
+            n_pages = len(reader.pages)
+            take = min(max_pages, n_pages)
+            for i in range(take):
+                text_parts.append(reader.pages[i].extract_text() or "")
+        text = "\n".join(text_parts)
+        if len(text) > MAX_CHARS_PER_DOCUMENT:
+            text = text[:MAX_CHARS_PER_DOCUMENT]
+        logger.info(
+            "[toc] document id=%s pdf pages read=%s/%s chars=%s",
+            doc.id,
+            take,
+            n_pages,
+            len(text),
+        )
+        return text
+
+    if suffix in {".txt", ".md"}:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        out = text[:char_budget]
+        logger.info("[toc] document id=%s txt/md head chars=%s (of %s)", doc.id, len(out), len(text))
+        return out
+
+    if suffix == ".docx":
+        try:
+            import docx  # type: ignore
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError(
+                "python-docx is required to extract text from DOCX"
+            ) from exc
+        d = docx.Document(str(path))
+        text = "\n".join(p.text or "" for p in d.paragraphs)
+        out = text[:char_budget]
+        logger.info("[toc] document id=%s docx head chars=%s (of %s)", doc.id, len(out), len(text))
+        return out
+
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+    out = text[:char_budget]
+    logger.info("[toc] document id=%s fallback head chars=%s", doc.id, len(out))
+    return out
 
 
 def split_text_with_overlap(text: str, page_number: int | None = None) -> List[Dict]:
