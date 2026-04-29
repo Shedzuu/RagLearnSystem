@@ -1272,6 +1272,34 @@ class PreplanChatView(APIView):
         )
         return (out, reply)
 
+    @staticmethod
+    def _coerce_preplan_json_payload(data) -> dict:
+        """Some providers return a list or scalar; normalize to the expected object shape."""
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            if not data:
+                return {"reply": "", "suggested_goals": "", "topics": [], "questions": []}
+            if all(isinstance(x, str) for x in data):
+                return {"reply": "", "suggested_goals": "", "topics": data, "questions": []}
+            if all(isinstance(x, dict) for x in data):
+                merged: dict = {}
+                for item in data:
+                    merged.update(item)
+                if merged:
+                    return merged
+            try:
+                blob = json.dumps(data, ensure_ascii=False)
+            except (TypeError, ValueError):
+                blob = str(data)
+            return {"reply": blob, "suggested_goals": "", "topics": [], "questions": []}
+        return {
+            "reply": strip_light_markdown_for_ui(str(data)),
+            "suggested_goals": "",
+            "topics": [],
+            "questions": [],
+        }
+
     def post(self, request, *args, **kwargs):
         raw_doc_ids = request.data.get("document_ids")
         if raw_doc_ids is None:
@@ -1579,7 +1607,12 @@ class PreplanChatView(APIView):
                             max_total_chars=18000,
                         )
             else:
-                context = rag.build_context(docs, query=message, top_k=30, max_total_chars=16000)
+                context = rag.build_context(
+                    docs,
+                    query=message,
+                    top_k=40,
+                    max_total_chars=24000,
+                )
         except Exception:
             # Fallback until migrations/embeddings are fully available.
             # Keeps pre-plan flow working even if doc-level vector chunks are not ready.
@@ -1589,8 +1622,8 @@ class PreplanChatView(APIView):
                 per_doc_cap = 4500
                 max_total_chars = 18000
             else:
-                per_doc_cap = 4000
-                max_total_chars = 16000
+                per_doc_cap = 5500
+                max_total_chars = 22000
             for doc in docs:
                 try:
                     text = _load_document_text(doc) or ""
@@ -1651,18 +1684,21 @@ class PreplanChatView(APIView):
             system_prompt = (
                 "You are an expert instructional designer and tutor.\n"
                 "You will receive excerpts from the user's selected study documents.\n"
-                "Your job is to help the user clarify what they want to learn and produce a high-quality 'learning goals' text.\n\n"
+                "You help with (A) questions about what the book/materials contain and (B) refining learning goals.\n\n"
                 "Rules:\n"
-                "- First, list the main topics you can confidently identify from the materials.\n"
-                "- Then ask 3-7 clarifying questions to refine scope, level, and priorities.\n"
-                "- Then propose 'suggested_goals' as a concise paragraph (or bullet list) the user can paste into the plan form.\n"
+                "- For questions like «что в книге про X», «основы Python», «что такое классы»: answer mainly in 'reply'. "
+                "Ground every claim in the excerpts (sections, pages, examples when visible). "
+                "Give enough detail to be useful — several short paragraphs or a structured list is OK; do not artificially shorten.\n"
+                "- When the user wants to define a study plan, also populate 'topics' with main themes from the materials, "
+                "'questions' with 3-7 clarifying questions, and 'suggested_goals' with text they can paste into the form.\n"
+                "- If excerpts do not contain enough to answer, say so in 'reply' and still list what *is* visible.\n"
                 "- If the user asks something outside the provided materials, say it and propose how to proceed.\n"
                 "- Reply in the same language as the user.\n\n"
                 "Return ONLY valid JSON with keys:\n"
                 "- reply: string (your full answer as plain text, no markdown)\n"
-                "- suggested_goals: string (clean text the user can paste)\n"
+                "- suggested_goals: string (clean text the user can paste; may be empty if the user only asked for content, not goals)\n"
                 "- topics: array of strings\n"
-                "- questions: array of strings\n\n"
+                "- questions: array of strings (may be empty if the user only asked for a factual summary)\n\n"
                 f"Materials excerpts (retrieved):\n{context}\n"
             )
 
@@ -1678,8 +1714,15 @@ class PreplanChatView(APIView):
         # llm already initialized above (used by router and generation).
 
         try:
-            # Prefer JSON response format when supported
-            _exact_max = 2200 if (mode == "exact" and exact_drilldown) else (1300 if mode == "exact" else 1200)
+            # Prefer JSON response format when supported.
+            # Semantic preplan packs reply + topics + questions + suggested_goals — needs a larger budget than 1200 tokens.
+            _semantic_max = int(os.getenv("LLM_PREPLAN_SEMANTIC_MAX_TOKENS", "4096"))
+            _semantic_max = max(1200, min(_semantic_max, 8000))
+            _exact_max = (
+                2200
+                if (mode == "exact" and exact_drilldown)
+                else (1300 if mode == "exact" else _semantic_max)
+            )
             resp = llm._client.chat.completions.create(
                 model=llm.model_name,
                 messages=messages,
@@ -1701,8 +1744,7 @@ class PreplanChatView(APIView):
                     f"{content}"
                 )
                 data = llm.complete_json(repair_system, repair_user)
-            if not isinstance(data, dict):
-                raise ValueError("LLM returned non-object JSON.")
+            data = self._coerce_preplan_json_payload(data)
             exact_topics = self._normalize_exact_topics(data.get("exact_topics") or [])
             if mode == "exact" and not exact_topics:
                 exact_topics = self._normalize_exact_topics(self._build_exact_topics_fallback(data))
