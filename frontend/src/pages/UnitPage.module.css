@@ -1,8 +1,9 @@
 .page {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--page-bg);
+  overflow: hidden;
 }
 
 .main {
@@ -10,6 +11,7 @@
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr) 320px;
   height: calc(100vh - 64px);
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -153,12 +155,9 @@
 }
 
 .chatColumn {
-  height: calc(100vh - 64px);
+  height: 100%;
   overflow: hidden;
   min-height: 0;
-  position: sticky;
-  top: 64px;
-  align-self: start;
 }
 
 .questionHeader {
