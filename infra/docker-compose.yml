@@ -6,7 +6,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6382:6379"
 
   db:
     image: pgvector/pgvector:pg15
@@ -17,8 +17,8 @@ services:
     volumes:
       - diploma_pg_data:/var/lib/postgresql/data
     ports:
-      # Открываем Postgres наружу на 5433
-      - "5433:5432"
+      # Хост-порт 5436: не пересекается с test-db (5433), mlbahandi-dev-db (5434), dev compose (5435)
+      - "5436:5432"
 
   backend:
     build:
@@ -32,7 +32,7 @@ services:
       - backend_media:/app/media
       - hf_cache:/root/.cache/huggingface
     ports:
-      - "8000:8000"
+      - "8002:8000"
     environment:
       # Django
       SECRET_KEY: ${PROD_JWT_SECRET_KEY}
